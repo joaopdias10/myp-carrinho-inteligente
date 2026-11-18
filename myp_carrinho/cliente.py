@@ -362,6 +362,8 @@ class MypClient:
             if fe and not fe.select_one('a[href="/login"]'):
                 t = fe.get_text(" ", strip=True)
                 v.frete_estimado = 0.0 if re.search(r"gr[aá]tis", t, re.I) else parse_brl(t)
+        except BloqueioMyp:
+            return v  # sem dados por enquanto; não guarda, para tentar de novo depois
         except ErroMyp as e:
             self.log(f"não consegui ler o vendedor {nick}: {e}")
         self._vendedores[nick] = v

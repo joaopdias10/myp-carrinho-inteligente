@@ -247,8 +247,18 @@ def otimizar_com_frete_real(itens, vendedores, regra, cotador: CotadorFrete,
             o = min((o for it in itens for o in it.candidatas if o.vendedor == v),
                     key=lambda o: o.preco)
             amostras[v] = o.id_estoque
-        for v, fr in cotador.cotar(amostras, progresso).items():
+        try:
+            novos = cotador.cotar(amostras, progresso)
+        except BloqueioMyp as e:
+            cotador.log(f"frete real interrompido: {e}")
+            for v in sem_real:  # mostra o motivo; esses vendedores ficam com o frete suposto
+                cotados.setdefault(v, FreteReal(v, erro=str(e)))
+            break
+        for v, fr in novos.items():
             cotados[v] = fr
             if fr.melhor:
                 regra.reais[v] = fr.melhor.preco
-    return res, cotados
+    else:
+        return res, cotados
+    # interrompido: recalcula com o que se sabe (reais onde houver, suposto no resto)
+    return otimizar(itens, vendedores, regra, usar_exato=usar_exato), cotados
