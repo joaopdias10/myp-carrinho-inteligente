@@ -12,8 +12,9 @@ import pandas as pd
 import streamlit as st
 
 from myp_carrinho import (QUALIDADES, ErroMyp, Filtros, MypClient, RegraFrete,
-                          aplicar_filtros, carregar_vendedores, coletar, itens_atendiveis,
-                          mais_barato_por_carta, otimizar, segredo)
+                          aplicar_filtros, carregar_vendedores, coletar, completar, itens_atendiveis,
+                          mais_barato_por_carta, otimizar, segredo, CotadorFrete,
+                          otimizar_com_frete_real)
 
 st.set_page_config(page_title="MYP Carrinho Inteligente", page_icon="🃏", layout="wide")
 
@@ -88,11 +89,17 @@ with st.sidebar:
                                    help="Usado quando a MYP não informa o frete (sem login).")
     frete_uf = st.number_input("Frete suposto para vendedor da sua UF (R$)", 0.0, 200.0, 15.0, 1.0,
                                disabled=uf == "—")
+    usar_frete_real = st.toggle("Calcular frete real pelo CEP", value=False,
+                                help="Para cada vendedor do carrinho escolhido, o app simula o carrinho "
+                                     "da MYP numa sessão anônima (nada é comprado) e lê as opções de "
+                                     "envio (frete fixo, PAC, SEDEX…). Usa a mais barata e recalcula.")
+    cep = st.text_input("Seu CEP", placeholder="00000-000", disabled=not usar_frete_real,
+                        value=segredo("cep.txt", "MYP_CEP") or "")
 
     with st.expander("Avançado"):
-        max_paginas = st.slider("Páginas de ofertas por edição", 1, 10, 5,
-                                help="Cada página tem 10 ofertas, das mais baratas para as mais caras. "
-                                     "Mais páginas = mais opções, porém coleta mais lenta.")
+        max_paginas = st.slider("Limite de páginas por edição", 1, 20, 10,
+                                help="Teto de segurança. O app já para sozinho quando as próximas "
+                                     "páginas (mais caras) não podem baratear o carrinho.")
         usar_exato = st.toggle("Otimização exata (recomendado)", value=True)
         token = st.text_input("Token da API da MYP", type="password",
                               value=segredo("api_token.txt", "MYP_API_TOKEN") or "",
@@ -135,14 +142,16 @@ O nome pode estar em **inglês ou português**. O código da edição é o que a
 """)
 
 cli = cliente(token or None, cookie or None)
+filtros = Filtros(qualidade_min=qualidade, idiomas=idiomas, excluir=excluir,
+                  printings_excluir=sem_printing)
+regra = RegraFrete(padrao=frete_padrao, mesmo_uf=frete_uf if uf != "—" else None,
+                   uf=uf if uf != "—" else None)
 
 # ------------------------------------------------------------------ coleta
 if buscar:
     if not texto.strip():
         st.warning("Escreva pelo menos uma carta.")
     else:
-        avisos: list[str] = []
-        cli.log = avisos.append
         with st.status("Buscando ofertas na MYP…", expanded=True) as status:
             barra = st.progress(0.0)
             msg = st.empty()
@@ -151,16 +160,18 @@ if buscar:
                 barra.progress(min(max(frac, 0.0), 1.0))
                 msg.caption(texto_msg)
 
-            try:
-                st.session_state.itens = coletar(cli, texto, jogo, max_paginas, prog)
-                st.session_state.jogo_coletado = jogo
-                status.update(label="Ofertas carregadas", state="complete", expanded=False)
-            except ErroMyp as e:
-                status.update(label="Falha ao acessar a MYP", state="error")
-                st.error(f"{e}. A MYP pode ter limitado o acesso por alguns minutos; tente de novo daqui a pouco.")
-        for a in dict.fromkeys(avisos):
-            st.caption(f"⏳ {a}")
+            itens_novos, bloqueio = coletar(cli, texto, jogo, filtros, regra.maximo, max_paginas, prog)
+            st.session_state.itens = itens_novos
+            st.session_state.jogo_coletado = jogo
+            st.session_state.aviso_bloqueio = bloqueio
+            status.update(label="Coleta interrompida pela MYP" if bloqueio else "Ofertas carregadas",
+                          state="error" if bloqueio else "complete", expanded=False)
         st.rerun()
+
+if st.session_state.get("aviso_bloqueio"):
+    st.warning(f"⏳ Resultado parcial: {st.session_state.aviso_bloqueio}. "
+               "Clique em **Buscar ofertas** de novo depois disso; o que já foi lido está no cache "
+               "e a busca continua de onde parou.")
 
 itens = st.session_state.get("itens")
 if not itens:
@@ -171,8 +182,18 @@ if not itens:
     st.stop()
 
 # ------------------------------------------------------------------ filtros e resumo por carta
-aplicar_filtros(itens, Filtros(qualidade_min=qualidade, idiomas=idiomas, excluir=excluir,
-                               printings_excluir=sem_printing))
+# Filtros ou frete mudaram? Busca só as páginas que passaram a importar (o resto vem do cache).
+paginas_antes = sum(it.paginas_lidas for it in itens)
+with st.spinner("Conferindo se faltam ofertas para esses filtros…"):
+    try:
+        completar(cli, itens, filtros, regra.maximo, max_paginas)
+        st.session_state.aviso_bloqueio = None
+    except ErroMyp as e:
+        st.warning(f"Não consegui buscar mais ofertas agora ({e}).")
+novas_paginas = sum(it.paginas_lidas for it in itens) - paginas_antes
+if novas_paginas:
+    st.toast(f"{novas_paginas} página(s) de ofertas a mais para esses filtros")
+aplicar_filtros(itens, filtros, regra.maximo)
 ok = itens_atendiveis(itens)
 
 st.subheader("Cartas da lista")
@@ -185,7 +206,9 @@ for it in itens:
         situacao = "❌ não encontrada"
     else:
         situacao = f"⚠️ só {it.disponivel} un. com esses filtros"
-    linhas.append({"Carta": it.linha, "Qtd": it.qtd, "Edições": len(it.produtos),
+    linhas.append({"Carta": it.linha, "Qtd": it.qtd,
+                   "Edições": sum(p.tem_oferta for p in it.produtos),
+                   "Páginas lidas": it.paginas_lidas,
                    "Ofertas válidas": len(it.ofertas), "Unidades": it.disponivel,
                    "Menor preço": menor, "Situação": situacao, "Observação": it.aviso or ""})
 st.dataframe(pd.DataFrame(linhas), hide_index=True, use_container_width=True,
@@ -193,11 +216,11 @@ st.dataframe(pd.DataFrame(linhas), hide_index=True, use_container_width=True,
 
 # ------------------------------------------------------------------ vendedores e otimização
 res = base = None
+cotador = None
+cotados: dict = {}
 vendedores: dict = {}
-regra = RegraFrete(padrao=frete_padrao, mesmo_uf=frete_uf if uf != "—" else None,
-                   uf=uf if uf != "—" else None)
 if ok:
-    faltam = {o.vendedor for it in ok for o in it.ofertas} - set(cli._vendedores)
+    faltam = {o.vendedor for it in ok for o in it.candidatas} - set(cli._vendedores)
     if faltam:
         with st.status(f"Lendo {len(faltam)} vendedores (cidade e frete)…", expanded=False) as status:
             barra = st.progress(0.0)
@@ -205,9 +228,29 @@ if ok:
             status.update(label="Vendedores carregados", state="complete")
     else:
         vendedores = carregar_vendedores(cli, ok)
-    with st.spinner("Calculando a melhor combinação…"):
+    cotador = None
+    if usar_frete_real and cep.strip():
+        try:
+            cotador = CotadorFrete(cep)
+        except ValueError as e:
+            st.sidebar.error(str(e))
+    if cotador:
+        with st.status("Calculando a melhor combinação com frete real…", expanded=False) as status:
+            barra = st.progress(0.0)
+            try:
+                res, cotados = otimizar_com_frete_real(
+                    ok, vendedores, regra, cotador, usar_exato=usar_exato,
+                    progresso=lambda f, m: barra.progress(min(f, 1.0), text=m))
+                status.update(label="Frete real calculado", state="complete")
+            except ErroMyp as e:
+                status.update(label="Não consegui calcular o frete real agora", state="error")
+                st.warning(f"{e}. Usando os fretes supostos.")
+                res = otimizar(ok, vendedores, regra, usar_exato=usar_exato)
         base = mais_barato_por_carta(ok, vendedores, regra)
-        res = otimizar(ok, vendedores, regra, usar_exato=usar_exato)
+    else:
+        with st.spinner("Calculando a melhor combinação…"):
+            base = mais_barato_por_carta(ok, vendedores, regra)
+            res = otimizar(ok, vendedores, regra, usar_exato=usar_exato)
 
 no_carrinho: dict[int, int] = {}
 if res:
@@ -232,9 +275,9 @@ with aba_carrinho:
         m2.metric("Cartas", brl(res.cartas))
         m3.metric("Frete", brl(res.frete))
         m4.metric("Vendedores", len(res.subtotais))
-        if not cli.logado:
-            st.caption("ℹ️ Fretes **supostos** (sem login). Para usar o frete estimado pela MYP, "
-                       "informe o cookie da sua sessão em *Avançado*.")
+        if not cotador and not cli.logado:
+            st.caption("ℹ️ Fretes **supostos**. Para usar o frete real, ative "
+                       "*Calcular frete real pelo CEP* na barra lateral.")
         pendentes = [it for it in itens if it not in ok]
         if pendentes:
             st.caption("Fora do carrinho por falta de estoque: "
@@ -260,6 +303,13 @@ with aba_carrinho:
                             chips.append(f'<span class="chip chip-alerta">faltam {brl(falta)} p/ frete grátis '
                                          f'(acima de {brl(vd.frete_gratis_a_partir)})</span>')
                     st.markdown(" ".join(chips), unsafe_allow_html=True)
+                    fr_real = cotados.get(v)
+                    if fr_real and fr_real.opcoes:
+                        st.caption("Opções de envio: " + " · ".join(
+                            f"{o.nome} {brl(o.preco)}" + (f" ({o.prazo})" if o.prazo else "")
+                            for o in sorted(fr_real.opcoes, key=lambda o: o.preco)))
+                    elif fr_real and fr_real.erro:
+                        st.caption(f"Frete real indisponível ({fr_real.erro}); usando o suposto.")
                 with c2:
                     st.metric("Subtotal + frete", brl(sub + fr))
                 rows = [{"Carta": it.nome_produto(o.id_produto), "Qtd": n, "Qualidade": o.qualidade,

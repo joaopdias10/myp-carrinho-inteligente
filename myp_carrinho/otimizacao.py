@@ -7,7 +7,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .cliente import QUALIDADES, ErroMyp, MypClient, Oferta, Produto, Vendedor
+from .cliente import QUALIDADES, BloqueioMyp, ErroMyp, MypClient, Oferta, Produto, Vendedor
 
 Log = Callable[[str], None]
 Progresso = Callable[[float, str], None]
@@ -15,13 +15,24 @@ Progresso = Callable[[float, str], None]
 
 # ================================================================ lista de cartas
 @dataclass
+class EstadoEdicao:
+    """Quanto já lemos das ofertas de uma edição."""
+    paginas: int = 0
+    piso: float = 0.0  # menor preço possível de uma oferta ainda não lida
+    esgotada: bool = False
+
+
+@dataclass
 class Item:
     linha: str
     qtd: int
     produtos: list[Produto] = field(default_factory=list)
     todas_ofertas: list[Oferta] = field(default_factory=list)  # sem filtro
     ofertas: list[Oferta] = field(default_factory=list)  # filtradas, por preço
+    candidatas: list[Oferta] = field(default_factory=list)  # filtradas e que podem entrar no ótimo
+    estado: dict[int, EstadoEdicao] = field(default_factory=dict)
     aviso: str | None = None
+    paginas_lidas: int = 0
 
     def nome_produto(self, id_produto: int) -> str:
         p = next((p for p in self.produtos if p.id == id_produto), None)
@@ -92,29 +103,20 @@ def resolver(cli: MypClient, jogo: str, alvo: str) -> tuple[list[Produto], str |
     return cands, aviso
 
 
-def coletar(cli: MypClient, texto_lista: str, jogo: str, max_paginas: int = 5,
-            progresso: Progresso | None = None) -> list[Item]:
-    """Resolve cada linha e baixa as ofertas (sem filtros)."""
+def resolver_itens(cli: MypClient, texto_lista: str, jogo: str,
+                   progresso: Progresso | None = None) -> list[Item]:
+    """Transforma cada linha da lista nas edições correspondentes (só API/busca)."""
     progresso = progresso or (lambda f, m: None)
     linhas = ler_lista(texto_lista)
     itens: list[Item] = []
     for i, (qtd, alvo) in enumerate(linhas):
+        progresso(i / max(len(linhas), 1), f"Procurando {alvo}")
         it = Item(linha=alvo, qtd=qtd)
-        progresso(i / max(len(linhas), 1), f"Buscando {alvo}")
         try:
             it.produtos, it.aviso = resolver(cli, jogo, alvo)
         except ErroMyp as e:
             it.aviso = f"falha na busca: {e}"
-        com_oferta = [p for p in it.produtos if p.tem_oferta]
-        for j, p in enumerate(com_oferta):
-            progresso((i + (j + 1) / (len(com_oferta) + 1)) / len(linhas),
-                      f"{alvo}: ofertas de {p.edicao} {p.numero} ({j + 1}/{len(com_oferta)})")
-            try:
-                it.todas_ofertas.extend(cli.ofertas(p, max_paginas))
-            except ErroMyp as e:
-                it.aviso = f"algumas edições não carregaram ({e})"
         itens.append(it)
-    progresso(1.0, "Coleta concluída")
     return itens
 
 
@@ -127,7 +129,29 @@ class Filtros:
     printings_excluir: list[str] = field(default_factory=list)  # ex.: ["Foil"]
 
 
-def aplicar_filtros(itens: list[Item], f: Filtros) -> None:
+# Folga do limiar, em múltiplos do maior frete. Com 2.0 o corte é garantidamente exato;
+# com 1.0 só perde o caso raro em que pagar mais caro numa carta faz um vendedor passar do
+# frete grátis e ainda evita abrir outro vendedor. 1.0 abre bem menos páginas.
+FOLGA_FRETE = 1.0
+
+
+def _limiar(ofertas: list[Oferta], qtd: int, frete_max: float) -> float:
+    """Preço acima do qual uma oferta não compensa no carrinho.
+
+    Seja p o preço da qtd-ésima unidade mais barata que passa nos filtros. Trocar uma
+    oferta mais cara por uma dessas unidades baratas economiza (preço - p) e custa, no
+    máximo, abrir mais um vendedor (frete_max); no pior caso, também fazer outro perder
+    o frete grátis (2 × frete_max). Ofertas acima de p + FOLGA_FRETE × frete_max ficam fora."""
+    acum = 0
+    for o in ofertas:  # já ordenadas por preço
+        acum += o.quantidade
+        if acum >= qtd:
+            return o.preco + FOLGA_FRETE * frete_max
+    return math.inf
+
+
+def aplicar_filtros(itens: list[Item], f: Filtros, frete_max: float | None = None) -> None:
+    """Preenche `ofertas` (filtradas) e `candidatas` (filtradas e abaixo do limiar)."""
     q_ok = set(QUALIDADES[: QUALIDADES.index(f.qualidade_min) + 1])
     idiomas = {norm(x) for x in f.idiomas}
     excluir = {x.strip().lower() for x in f.excluir if x.strip()}
@@ -140,6 +164,91 @@ def aplicar_filtros(itens: list[Item], f: Filtros) -> None:
              and o.vendedor.lower() not in excluir
              and not (o.printing and norm(o.printing) in sem)),
             key=lambda o: o.preco)
+        if frete_max is None:
+            it.candidatas = list(it.ofertas)
+        else:
+            lim = _limiar(it.ofertas, it.qtd, frete_max)
+            it.candidatas = [o for o in it.ofertas if o.preco <= lim]
+
+
+# ================================================================ coleta econômica
+# A API só informa o preço mínimo em NM. Para filtros que aceitam qualidades piores,
+# usamos uma fração dele como piso estimado (ofertas SP/MP costumam ser mais baratas).
+FATOR_QUALIDADE = {"NM": 1.0, "SP": 0.6, "MP": 0.45, "HP": 0.3, "DM": 0.2}
+
+
+def _piso_edicao(p: Produto, f: Filtros) -> float:
+    """Menor preço que esperamos encontrar numa edição ainda não aberta."""
+    if not p.precos_nm:
+        return 0.0  # sem informação (veio da busca do site): abre de qualquer jeito
+    idiomas = {norm(x) for x in f.idiomas}
+    precos = [v for lang, v in p.precos_nm if not idiomas or norm(lang) in idiomas]
+    base = min(precos or [v for _, v in p.precos_nm])
+    return base * FATOR_QUALIDADE.get(f.qualidade_min, 0.2)
+
+
+def completar(cli: MypClient, itens: list[Item], f: Filtros, frete_max: float,
+              max_paginas: int = 10, progresso: Progresso | None = None) -> int:
+    """Baixa só as páginas de ofertas que ainda podem mudar o resultado.
+
+    Para cada carta, abre sempre a página com o menor preço possível ainda não lida
+    (edição mais barata primeiro, depois as páginas seguintes) e para quando esse piso
+    passa do limiar da carta. Páginas já baixadas vêm do cache. Retorna quantas
+    páginas foram abertas nesta chamada."""
+    progresso = progresso or (lambda fr, m: None)
+    abertas = 0
+    for i, it in enumerate(itens):
+        while True:
+            aplicar_filtros([it], f, frete_max)
+            lim = _limiar(it.ofertas, it.qtd, frete_max)
+            proxima = None
+            for p in it.produtos:
+                if not p.tem_oferta:
+                    continue
+                st = it.estado.setdefault(p.id, EstadoEdicao())
+                if st.esgotada or st.paginas >= max_paginas:
+                    continue
+                piso = _piso_edicao(p, f) if st.paginas == 0 else st.piso
+                if piso <= lim and (proxima is None or piso < proxima[0]):
+                    proxima = (piso, p, st)
+            if proxima is None:
+                break
+            _, p, st = proxima
+            progresso(i / len(itens),
+                      f"{it.linha}: {p.edicao} {p.numero}, página {st.paginas + 1}")
+            try:
+                novas, piso = cli.pagina_ofertas(p, st.paginas + 1)
+            except BloqueioMyp:
+                raise  # para tudo; o que já foi lido fica nos itens e no cache
+            except ErroMyp as e:
+                it.aviso = f"algumas edições não carregaram ({e})"
+                st.esgotada = True
+                continue
+            st.paginas += 1
+            it.paginas_lidas += 1
+            abertas += 1
+            vistos = {o.id_estoque for o in it.todas_ofertas}
+            it.todas_ofertas.extend(o for o in novas if o.id_estoque not in vistos)
+            if piso is None:
+                st.esgotada = True
+            else:
+                st.piso = piso
+    progresso(1.0, "Ofertas carregadas")
+    return abertas
+
+
+def coletar(cli: MypClient, texto_lista: str, jogo: str, filtros: Filtros, frete_max: float,
+            max_paginas: int = 10, progresso: Progresso | None = None
+            ) -> tuple[list[Item], str | None]:
+    """Resolve a lista e baixa as ofertas necessárias para esses filtros.
+    Retorna (itens, aviso_de_bloqueio). Se a MYP limitar o acesso no meio, os itens vêm
+    com o que deu para ler; chamar `completar` depois continua de onde parou."""
+    itens = resolver_itens(cli, texto_lista, jogo, progresso)
+    try:
+        completar(cli, itens, filtros, frete_max, max_paginas, progresso)
+    except BloqueioMyp as e:
+        return itens, str(e)
+    return itens, None
 
 
 # ================================================================ frete
@@ -148,6 +257,7 @@ class RegraFrete:
     padrao: float = 20.0
     mesmo_uf: float | None = None
     uf: str | None = None
+    reais: dict[str, float] = field(default_factory=dict)  # vendedor -> frete real (carrinho)
 
     def custo(self, v: Vendedor, subtotal: float) -> float:
         if v.frete_gratis_a_partir and subtotal >= v.frete_gratis_a_partir:
@@ -155,6 +265,8 @@ class RegraFrete:
         return self.custo_base(v)
 
     def custo_base(self, v: Vendedor) -> float:
+        if v.nick in self.reais:
+            return self.reais[v.nick]
         if v.frete_estimado is not None:
             return v.frete_estimado
         if self.uf and self.mesmo_uf is not None and v.uf == self.uf:
@@ -162,11 +274,18 @@ class RegraFrete:
         return self.padrao
 
     def origem(self, v: Vendedor) -> str:
+        if v.nick in self.reais:
+            return "real (carrinho MYP)"
         if v.frete_estimado is not None:
             return "estimado pela MYP"
         if self.uf and self.mesmo_uf is not None and v.uf == self.uf:
             return "suposto (mesma UF)"
         return "suposto"
+
+    @property
+    def maximo(self) -> float:
+        """Maior frete que um vendedor pode custar, para o limiar de poda."""
+        return max([self.padrao, self.mesmo_uf or 0.0, *self.reais.values()])
 
 
 # ================================================================ otimização
@@ -199,7 +318,7 @@ def _alocar(itens: list[Item], permitidos: set[str] | None) -> Alocacao | None:
     aloc: Alocacao = []
     for it in itens:
         falta = it.qtd
-        for o in it.ofertas:
+        for o in it.candidatas:
             if falta == 0:
                 break
             if permitidos is not None and o.vendedor not in permitidos:
@@ -259,7 +378,7 @@ def exato(itens, vendedores, frete, limite_seg: float = 60) -> Resultado | None:
     import numpy as np
     from scipy.optimize import Bounds, LinearConstraint, milp
 
-    ofs = [(i, o) for i, it in enumerate(itens) for o in it.ofertas]
+    ofs = [(i, o) for i, it in enumerate(itens) for o in it.candidatas]
     vs = sorted({o.vendedor for _, o in ofs})
     vi = {v: k for k, v in enumerate(vs)}
     nx, nv = len(ofs), len(vs)
@@ -328,7 +447,7 @@ def itens_atendiveis(itens: list[Item]) -> list[Item]:
 def carregar_vendedores(cli: MypClient, itens: list[Item],
                         progresso: Progresso | None = None) -> dict[str, Vendedor]:
     progresso = progresso or (lambda f, m: None)
-    nicks = sorted({o.vendedor for it in itens for o in it.ofertas})
+    nicks = sorted({o.vendedor for it in itens for o in it.candidatas})
     out = {}
     for k, n in enumerate(nicks):
         progresso(k / max(len(nicks), 1), f"Vendedor {n} ({k + 1}/{len(nicks)})")
