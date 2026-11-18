@@ -99,3 +99,7 @@ cli.py            # linha de comando
 ## Uso responsável
 
 Use para consultas pessoais, com moderação. Respeite os [termos da MYP Cards](https://mypcards.com) e a exigência de atribuição da API: onde os dados forem exibidos, indique que vêm da MYP Cards, com link para https://mypcards.com.
+
+## Licença
+
+[MIT](LICENSE). A licença cobre o código deste projeto; os dados exibidos pertencem à MYP Cards.
