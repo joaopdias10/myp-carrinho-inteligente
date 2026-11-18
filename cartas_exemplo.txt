@@ -1,0 +1,8 @@
+# quantidade  carta
+# Aceita: URL da carta, ID, "nome | EDIÇÃO número", "nome | EDIÇÃO" ou só "nome" (qualquer edição).
+# Nome exato em inglês OU português. Edição com o código usado na MYP (ex.: SV1, SV2).
+1 https://mypcards.com/pokemon/produto/204210/umbreon-vmax
+2 Umbreon V
+4 Nest Ball | SV1
+2 Boss's Orders
+4 Ultra Ball

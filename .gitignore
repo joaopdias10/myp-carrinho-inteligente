@@ -1,0 +1,15 @@
+# segredos locais
+cookie.txt
+api_token.txt
+.streamlit/secrets.toml
+
+# cache e saídas
+.cache_myp/
+resultado*.json
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
