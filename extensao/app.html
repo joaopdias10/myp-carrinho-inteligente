@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MYP Carrinho Inteligente</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>🛒 MYP Carrinho Inteligente</h1>
+  <p>Cole a lista, ajuste os filtros e deixe rodando: você pode usar outras abas enquanto isso.</p>
+</header>
+
+<main>
+  <form id="form">
+    <section class="cartao">
+      <h2>Lista de cartas</h2>
+      <label>Jogo
+        <select id="jogo"><option value="pokemon">Pokémon</option></select>
+      </label>
+      <label>Uma carta por linha
+        <textarea id="lista" rows="9" spellcheck="false" placeholder="4 Ultra Ball&#10;2x Boss's Orders | PAL&#10;Umbreon V | EVS 94&#10;https://mypcards.com/pokemon/produto/141400/..."></textarea>
+      </label>
+      <p class="dica">Formato: <code>[qtd] nome [| EDIÇÃO [número]]</code>. Também aceita o link ou o ID do produto. Nome exato, em português ou inglês.</p>
+    </section>
+
+    <section class="cartao">
+      <h2>Filtros</h2>
+      <div class="grade">
+        <label>Qualidade mínima
+          <select id="qualidadeMin">
+            <option value="NM">NM</option><option value="SP" selected>SP</option>
+            <option value="MP">MP</option><option value="HP">HP</option><option value="DM">DM</option>
+          </select>
+        </label>
+        <label>Idiomas <small>(vírgula; vazio = todos)</small>
+          <input id="idiomas" placeholder="Português, Inglês">
+        </label>
+        <label>Ignorar impressões
+          <input id="printingsExcluir" placeholder="Foil, Reverse Foil">
+        </label>
+        <label>Vendedores a evitar
+          <input id="excluir" placeholder="nick1, nick2">
+        </label>
+      </div>
+    </section>
+
+    <section class="cartao">
+      <h2>Frete</h2>
+      <div class="grade">
+        <label class="linha"><input type="checkbox" id="freteReal" checked> Calcular o frete real no meu carrinho da MYP</label>
+        <label>CEP <small>(vazio = o que estiver no carrinho)</small>
+          <input id="cep" inputmode="numeric" placeholder="00000-000">
+        </label>
+        <label>Frete suposto (R$) <small>até cotar</small>
+          <input id="padrao" type="number" step="0.5" min="0" value="20">
+        </label>
+        <label>Sua UF
+          <input id="uf" maxlength="2" placeholder="SP">
+        </label>
+        <label>Frete na mesma UF (R$)
+          <input id="mesmoUf" type="number" step="0.5" min="0" placeholder="opcional">
+        </label>
+      </div>
+      <p class="dica">O frete real é cotado no <strong>seu</strong> carrinho da MYP: a extensão põe 1 carta de cada vendedor, lê o frete e tira o que colocou. Itens que você já tinha ficam como estão. Informar o CEP pode trocar o CEP selecionado no seu carrinho.</p>
+    </section>
+
+    <details class="cartao">
+      <summary>Avançado</summary>
+      <div class="grade">
+        <label>Limite de páginas por edição
+          <input id="maxPaginas" type="number" min="1" max="20" value="10">
+        </label>
+        <label>Token da API MYP <small>(opcional)</small>
+          <input id="token" type="password" autocomplete="off" placeholder="X-Api-Token">
+        </label>
+      </div>
+      <button type="button" id="limparCache" class="secundario">Limpar cache de páginas</button>
+    </details>
+
+    <div class="acoes">
+      <button type="submit" id="buscar">Buscar ofertas</button>
+      <button type="button" id="cancelar" class="secundario" hidden>Cancelar</button>
+    </div>
+  </form>
+
+  <section id="status" class="cartao" hidden>
+    <div class="barra"><div id="barra"></div></div>
+    <p id="mensagem"></p>
+    <details><summary>Registro</summary><pre id="log"></pre></details>
+  </section>
+
+  <section id="avisos"></section>
+
+  <section id="resultado" hidden>
+    <nav class="abas">
+      <button data-aba="carrinho" class="ativa">🛒 Melhor carrinho</button>
+      <button data-aba="ofertas">🏷️ Todas as ofertas</button>
+      <button data-aba="cartas">📋 Cartas da lista</button>
+    </nav>
+    <div id="aba-carrinho" class="aba"></div>
+    <div id="aba-ofertas" class="aba" hidden></div>
+    <div id="aba-cartas" class="aba" hidden></div>
+  </section>
+</main>
+
+<footer>Dados: <a href="https://mypcards.com" target="_blank" rel="noopener">MYP Cards</a>. Projeto independente, sem vínculo com a MYP. Licença MIT.</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

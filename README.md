@@ -18,6 +18,7 @@ Escolher "a carta mais barata" de cada item quase nunca é o mais barato no fim:
 - **Otimização exata** com `scipy.optimize.milp`. Uma heurística serve de reserva.
 - **Comparação** com a compra "no olho" (o mais barato de cada carta), mostrando quanto você economiza.
 - **Interface visual** em Streamlit e **linha de comando**.
+- **Extensão para Chrome** (protótipo): roda tudo no seu navegador, sem Python. Veja [extensao/README.md](extensao/README.md).
 - **Exportação** em CSV e JSON.
 - **Coleta econômica**: só baixa as páginas que podem mudar o resultado, guarda tudo em cache local e respeita os limites de acesso da MYP.
 
@@ -56,6 +57,10 @@ python cli.py cartas_exemplo.txt --cep 01310-100
 ```
 
 Rode `python cli.py -h` para ver todas as opções.
+
+### Extensão do Chrome (protótipo)
+
+A pasta [`extensao/`](extensao/) tem a mesma lógica em JavaScript, como extensão do Chrome. A busca sai do seu navegador, com o seu IP e a sua sessão na MYP, e roda em segundo plano enquanto você usa outras abas. O frete real é cotado no **seu** carrinho da MYP, e um botão coloca o carrinho escolhido lá para você finalizar. Instalação e detalhes em [extensao/README.md](extensao/README.md).
 
 ### Formato da lista
 
@@ -100,6 +105,8 @@ myp_carrinho/
   frete_real.py   # cotação do frete real pelo carrinho da MYP
 app.py            # interface Streamlit
 cli.py            # linha de comando
+extensao/         # extensão do Chrome (mesma lógica em JavaScript)
+testes_extensao/  # compara a extensão com o código Python, offline
 ```
 
 ## Limitações
