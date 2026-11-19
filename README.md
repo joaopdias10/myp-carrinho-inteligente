@@ -11,14 +11,15 @@ Escolher "a carta mais barata" de cada item quase nunca é o mais barato no fim:
 - **Lista em texto livre**: nome (inglês ou português), nome + edição, nome + edição + número, ID ou URL da carta.
 - **Filtros**: qualidade mínima (NM, SP, MP, HP, DM), idiomas aceitos, versões a ignorar (ex.: Foil) e vendedores a evitar.
 - **Frete**:
+  - **frete real pelo seu CEP**: o app simula o carrinho da MYP e lê as opções de envio de cada vendedor (frete fixo, PAC, SEDEX…);
   - considera o valor de frete grátis de cada vendedor;
-  - com login, usa o frete estimado pela MYP;
-  - sem login, usa um valor suposto, que pode ser diferente para vendedores da sua UF.
+  - sem CEP, usa um valor suposto, que pode ser diferente para vendedores da sua UF.
+- **Todas as ofertas**: uma aba com o preço que cada vendedor colocou em cada carta, com filtros e ordenação.
 - **Otimização exata** com `scipy.optimize.milp`. Uma heurística serve de reserva.
 - **Comparação** com a compra "no olho" (o mais barato de cada carta), mostrando quanto você economiza.
 - **Interface visual** em Streamlit e **linha de comando**.
 - **Exportação** em CSV e JSON.
-- **Cache local** de 6 h e respeito aos limites de acesso da MYP.
+- **Coleta econômica**: só baixa as páginas que podem mudar o resultado, guarda tudo em cache local e respeita os limites de acesso da MYP.
 
 ## Instalação
 
@@ -38,12 +39,20 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Abra http://localhost:8501, cole sua lista e clique em **Buscar ofertas**. Os filtros e o frete ficam na barra lateral; mudar um deles recalcula o carrinho na hora, sem buscar tudo de novo.
+Abra http://localhost:8501, cole sua lista e clique em **Buscar ofertas**. Os filtros e o frete ficam na barra lateral; mudar um deles recalcula o carrinho na hora, buscando só as ofertas que passarem a importar.
+
+Para o frete real, ative **Calcular frete real pelo CEP** e informe seu CEP.
 
 ### Linha de comando
 
 ```bash
 python cli.py cartas_exemplo.txt --qualidade-min SP --idiomas "Português,Inglês" --uf SP --frete-mesmo-uf 15
+```
+
+Com frete real:
+
+```bash
+python cli.py cartas_exemplo.txt --cep 01310-100
 ```
 
 Rode `python cli.py -h` para ver todas as opções.
@@ -68,16 +77,19 @@ Uma carta por linha, com a quantidade na frente. `#` inicia um comentário.
 | O quê | Para quê | Como informar |
 |---|---|---|
 | Token da API da MYP | Sobe o limite da API de 10 para 60 req/min, o que deixa a busca por nome mais rápida | Peça em [mypcards.com/acesso-api](https://mypcards.com/acesso-api). Depois use o campo em *Avançado*, o arquivo `api_token.txt` ou a variável `MYP_API_TOKEN` |
-| Cookie da sua sessão | Faz o app ler o **frete estimado** de cada vendedor para o seu endereço | Copie o cabeçalho `Cookie` de uma requisição à mypcards.com (DevTools → Rede) para o campo em *Avançado*, o arquivo `cookie.txt` ou a variável `MYP_COOKIE` |
+| CEP padrão | Já deixa o campo de CEP preenchido | Arquivo `cep.txt` ou variável `MYP_CEP` |
+| Cookie da sua sessão | Alternativa ao CEP: com login, a página de cada vendedor mostra o frete estimado para o seu endereço | Copie o cabeçalho `Cookie` de uma requisição à mypcards.com (DevTools → Rede) para o campo em *Avançado*, o arquivo `cookie.txt` ou a variável `MYP_COOKIE` |
 
-`api_token.txt` e `cookie.txt` estão no `.gitignore`. Nunca compartilhe esses valores.
+`api_token.txt`, `cep.txt` e `cookie.txt` estão no `.gitignore`. Nunca compartilhe esses valores.
 
 ## Como funciona
 
 1. **Busca**: a [API pública da MYP](https://github.com/MYPCards/mypcards-api) (`/{jogo}/carta/{nome}`) encontra todas as edições da carta. Se o nome não estiver lá, o app usa a busca do site.
-2. **Ofertas**: a API não informa vendedores, estoque nem frete. Por isso o app lê as tabelas de ofertas da página de cada edição: vendedor, qualidade, idioma, versão, quantidade e preço. Elas vêm ordenadas por preço, 10 por página; por padrão o app lê até 5 páginas por edição.
-3. **Vendedores**: da página de cada vendedor saem a cidade/UF, o valor para frete grátis e, com login, o frete estimado.
-4. **Otimização**: o app escolhe quantas unidades comprar de cada oferta para minimizar `Σ preços + Σ fretes dos vendedores usados`. Ele respeita o estoque e zera o frete de quem passar do valor de frete grátis.
+2. **Ofertas**: a API não informa vendedores, estoque nem frete. Por isso o app lê as tabelas de ofertas da página de cada edição: vendedor, qualidade, idioma, versão, quantidade e preço. Elas vêm ordenadas pelo preço atual, 10 por página.
+3. **Coleta econômica**: o app abre primeiro a edição mais barata (pelo preço mínimo que a API informa) e só abre outra página ou edição enquanto ela ainda puder baratear o carrinho. O critério é o preço da unidade mais barata que passa nos filtros + o maior frete: uma oferta mais cara que isso não compensa nem para economizar um frete.
+4. **Vendedores**: da página de cada vendedor que pode entrar no carrinho saem a cidade/UF e o valor para frete grátis.
+5. **Otimização**: o app escolhe quantas unidades comprar de cada oferta para minimizar `Σ preços + Σ fretes dos vendedores usados`. Ele respeita o estoque e zera o frete de quem passar do valor de frete grátis.
+6. **Frete real** (opcional): para cada vendedor do carrinho escolhido, o app usa uma sessão **anônima** da MYP, nunca a sua conta. Ele adiciona uma carta ao carrinho, informa o CEP, lê as opções de envio e remove o item; nada é comprado. Com os valores reais, otimiza de novo, até o carrinho estabilizar. As cotações ficam em cache por 24 h.
 
 Estrutura:
 
@@ -85,16 +97,18 @@ Estrutura:
 myp_carrinho/
   cliente.py      # acesso à MYP (API + páginas), cache, limites de requisição
   otimizacao.py   # lista -> ofertas -> filtros -> frete -> otimização
+  frete_real.py   # cotação do frete real pelo carrinho da MYP
 app.py            # interface Streamlit
 cli.py            # linha de comando
 ```
 
 ## Limitações
 
-- **Frete sem login** é uma estimativa (valor fixo configurável).
-- **Limites de acesso**: a MYP usa Cloudflare e limita o acesso. Rajadas de requisições geram bloqueios temporários de alguns minutos. O app espera entre requisições, tenta de novo e guarda as páginas em cache. Mesmo assim, a primeira busca de uma lista grande leva alguns minutos.
-- **Mudanças no site**: a leitura das páginas depende do HTML atual da MYP e pode quebrar se o site mudar.
-- **Ofertas consideradas**: só as das primeiras páginas de cada edição (ajustável em *Avançado* / `--max-paginas`).
+- **Frete sem CEP** é uma estimativa (valor fixo configurável).
+- **Frete real** é cotado com 1 carta por vendedor e usa a opção de envio mais barata. Para poucas cartas o valor praticamente não muda; o valor final é confirmado na compra.
+- **Limites de acesso**: a MYP usa Cloudflare. Muitas requisições seguidas geram bloqueios temporários de alguns minutos. O app mantém um ritmo de ~4 s entre páginas. Se for bloqueado, mostra o resultado parcial e pede para buscar de novo alguns minutos depois; a busca continua de onde parou.
+- **Mudanças no site**: a leitura das páginas e do carrinho depende do HTML atual da MYP e pode quebrar se o site mudar.
+- **Corte de ofertas**: ofertas mais caras que "unidade mais barata + maior frete" são ignoradas. Em casos raros, uma delas poderia compensar por levar um vendedor ao frete grátis.
 
 ## Uso responsável
 

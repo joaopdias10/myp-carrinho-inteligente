@@ -16,6 +16,7 @@ import hashlib
 import html
 import json
 import os
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -40,7 +41,32 @@ QUALIDADES = ["NM", "SP", "MP", "HP", "DM"]  # melhor -> pior
 
 
 class ErroMyp(Exception):
-    """Falha ao acessar a MYP (bloqueio temporário, página fora do ar etc.)."""
+    """Falha ao acessar a MYP (página fora do ar, item inexistente etc.)."""
+
+
+class BloqueioMyp(ErroMyp):
+    """O Cloudflare da MYP limitou o acesso deste IP por alguns minutos."""
+
+
+PAUSA_BLOQUEIO = 240  # segundos sem requisições depois de um bloqueio persistente
+_bloqueado_ate = 0.0  # compartilhado entre clientes: o bloqueio é do IP, não da sessão
+
+
+def checar_bloqueio() -> None:
+    falta = _bloqueado_ate - time.time()
+    if falta > 0:
+        raise BloqueioMyp(f"a MYP limitou o acesso temporariamente; tente de novo em ~{falta / 60:.0f} min")
+
+
+def registrar_desafio(tentativa: int, log: Callable[[str], None]) -> None:
+    """Primeiro desafio: espera 45 s. Se persistir, desiste e pausa todas as requisições."""
+    global _bloqueado_ate
+    if tentativa == 0:
+        log("bloqueio temporário do Cloudflare; aguardando 45s")
+        time.sleep(45)
+        return
+    _bloqueado_ate = time.time() + PAUSA_BLOQUEIO
+    checar_bloqueio()
 
 
 def parse_brl(txt: str | None) -> float | None:
@@ -84,6 +110,13 @@ class Vendedor:
         return f"{BASE}/{self.nick}"
 
 
+IDIOMAS_API = {  # idioma da API (inglês) -> como aparece nas ofertas
+    "portuguese": "Português", "english": "Inglês", "japanese": "Japonês", "korean": "Coreano",
+    "chinese": "Chinês", "spanish": "Espanhol", "french": "Francês", "german": "Alemão",
+    "italian": "Italiano", "russian": "Russo",
+}
+
+
 @dataclass
 class Produto:
     id: int
@@ -93,6 +126,8 @@ class Produto:
     link: str
     tem_oferta: bool
     ofertas: list[Oferta] = field(default_factory=list)
+    # preço mínimo NM por idioma, vindo da API: [(idioma em português, preço)]
+    precos_nm: list[tuple[str, float]] = field(default_factory=list)
 
     @property
     def numero(self) -> str:
@@ -101,8 +136,10 @@ class Produto:
 
 class MypClient:
     def __init__(self, cookie: str | None = None, api_token: str | None = None,
-                 intervalo: float = 2.0, cache_dir: str | Path = ".cache_myp",
+                 intervalo: float = 4.0, cache_dir: str | Path = ".cache_myp",
                  cache_horas: float = 6.0, log: Callable[[str], None] | None = None):
+        # intervalo: ritmo constante entre páginas do site. Rajadas (~1 req/s) fazem o
+        # Cloudflare bloquear por minutos; um ritmo de ~4 s evita isso e sai mais rápido.
         self.s = requests.Session()
         self.s.headers.update(HEADERS)
         if cookie:
@@ -132,11 +169,12 @@ class MypClient:
         headers = {"Accept": "application/json"} if eh_api else {}
         if eh_api and self.api_token:
             headers["X-Api-Token"] = self.api_token
+        checar_bloqueio()
         r = None
         for tentativa in range(4):
             ultimo, intervalo = ((self._ultimo_api, self.intervalo_api) if eh_api
                                  else (self._ultimo, self.intervalo))
-            espera = intervalo - (time.time() - ultimo)
+            espera = intervalo * random.uniform(0.9, 1.25) - (time.time() - ultimo)
             if espera > 0:
                 time.sleep(espera)
             try:
@@ -151,13 +189,13 @@ class MypClient:
                 else:
                     self._ultimo = time.time()
 
-            desafio = r.status_code == 403 and "Just a moment" in r.text[:600]
-            if desafio and not eh_api:
+            if r.status_code == 403 and "Just a moment" in r.text[:600]:
                 self.intervalo = min(self.intervalo * 1.5, 10)  # desacelera de vez
-            if r.status_code == 429 or r.status_code >= 500 or desafio:
-                pausa = float(r.headers.get("Retry-After") or (61 if eh_api else 30 * (tentativa + 1)))
-                motivo = "bloqueio temporário do Cloudflare" if desafio else f"HTTP {r.status_code}"
-                self.log(f"{motivo}; aguardando {pausa:.0f}s")
+                registrar_desafio(tentativa, self.log)  # levanta BloqueioMyp se persistir
+                continue
+            if r.status_code == 429 or r.status_code >= 500:
+                pausa = float(r.headers.get("Retry-After") or (61 if eh_api else 20 * (tentativa + 1)))
+                self.log(f"HTTP {r.status_code}; aguardando {pausa:.0f}s")
                 time.sleep(pausa)
                 continue
             break
@@ -171,6 +209,13 @@ class MypClient:
     # ---------------- API pública ----------------
     @staticmethod
     def _produto_de_json(j: dict) -> Produto:
+        precos = []
+        for p in j.get("prices") or []:
+            try:
+                lang = (p.get("language") or "").strip()
+                precos.append((IDIOMAS_API.get(lang.lower(), lang), float(p["min_price"])))
+            except (KeyError, TypeError, ValueError):
+                pass
         return Produto(
             id=j["internal_code"],
             nome=j.get("name_pt") or j.get("name_en") or "",
@@ -178,6 +223,7 @@ class MypClient:
             codigo=j.get("card_code") or "",
             link=j.get("link") or f"{BASE}/produto/{j['internal_code']}",
             tem_oferta=bool(j.get("prices")) or j.get("min_price") is not None,
+            precos_nm=precos,
         )
 
     def jogos(self) -> dict[str, str]:
@@ -258,24 +304,43 @@ class MypClient:
                 pass
         return o
 
+    def pagina_ofertas(self, produto: Produto, pag: int) -> tuple[list[Oferta], float | None]:
+        """Lê a página `pag` das duas tabelas de ofertas da carta (lojistas certificados e
+        demais vendedores; 10 por página cada, ordenadas pelo preço atual).
+
+        Retorna (ofertas, piso_proxima): `piso_proxima` é o menor preço que uma oferta
+        ainda não vista pode ter (o último preço das tabelas que têm mais páginas), ou
+        None se não há mais páginas."""
+        url = produto.link if pag == 1 else (
+            f"{produto.link}?estoque-cert-page={pag}&estoque-outros-page={pag}")
+        soup = BeautifulSoup(self._get(url), "html.parser")
+        ofertas: list[Oferta] = []
+        pisos: list[float] = []
+        for tabela in soup.select("table"):
+            linhas = tabela.select("tr[data-key]")
+            if not linhas:
+                continue
+            precos = []
+            for tr in linhas:
+                o = self._linha_oferta(tr, produto.id)
+                if o:
+                    ofertas.append(o)
+                    precos.append(o.preco)
+            grade = tabela.find_parent(class_="grid-view") or tabela.parent
+            tem_mais = any(a.get_text(strip=True) == str(pag + 1)
+                           for a in grade.select(".pagination a"))
+            if tem_mais:
+                pisos.append(max(precos) if precos else 0.0)
+        return ofertas, (min(pisos) if pisos else None)
+
     def ofertas(self, produto: Produto, max_paginas: int = 5) -> list[Oferta]:
-        """Lê as ofertas das duas tabelas da página da carta (lojistas certificados e
-        demais vendedores). Cada tabela vem ordenada por preço, 10 por página, então
-        `max_paginas` limita a leitura às 10*max_paginas ofertas mais baratas de cada uma."""
+        """Lê todas as páginas (até `max_paginas`) de uma vez."""
         out: dict[int, Oferta] = {}
         for pag in range(1, max_paginas + 1):
-            url = produto.link if pag == 1 else (
-                f"{produto.link}?estoque-cert-page={pag}&estoque-outros-page={pag}")
-            soup = BeautifulSoup(self._get(url), "html.parser")
-            novos = 0
-            for tr in soup.select("tr[data-key]"):
-                o = self._linha_oferta(tr, produto.id)
-                if o and o.id_estoque not in out:
-                    out[o.id_estoque] = o
-                    novos += 1
-            tem_mais = any(a.get_text(strip=True) == str(pag + 1)
-                           for a in soup.select(".pagination a"))
-            if not novos or not tem_mais:
+            novas, piso = self.pagina_ofertas(produto, pag)
+            for o in novas:
+                out.setdefault(o.id_estoque, o)
+            if piso is None:
                 break
         produto.ofertas = list(out.values())
         return produto.ofertas
@@ -297,6 +362,8 @@ class MypClient:
             if fe and not fe.select_one('a[href="/login"]'):
                 t = fe.get_text(" ", strip=True)
                 v.frete_estimado = 0.0 if re.search(r"gr[aá]tis", t, re.I) else parse_brl(t)
+        except BloqueioMyp:
+            return v  # sem dados por enquanto; não guarda, para tentar de novo depois
         except ErroMyp as e:
             self.log(f"não consegui ler o vendedor {nick}: {e}")
         self._vendedores[nick] = v

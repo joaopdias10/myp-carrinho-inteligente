@@ -1,6 +1,7 @@
 """Versão de linha de comando.
 
     python cli.py cartas_exemplo.txt --qualidade-min SP --uf SP --frete-mesmo-uf 15
+    python cli.py cartas_exemplo.txt --cep 01310-100     # frete real por CEP
 """
 from __future__ import annotations
 
@@ -9,9 +10,9 @@ import json
 import sys
 from dataclasses import asdict
 
-from myp_carrinho import (QUALIDADES, Filtros, MypClient, RegraFrete, aplicar_filtros,
-                          carregar_vendedores, coletar, itens_atendiveis,
-                          mais_barato_por_carta, otimizar, segredo)
+from myp_carrinho import (QUALIDADES, CotadorFrete, Filtros, MypClient, RegraFrete,
+                          aplicar_filtros, carregar_vendedores, coletar, itens_atendiveis,
+                          mais_barato_por_carta, otimizar, otimizar_com_frete_real, segredo)
 
 
 def main():
@@ -24,8 +25,10 @@ def main():
     ap.add_argument("--frete-padrao", type=float, default=20.0)
     ap.add_argument("--uf")
     ap.add_argument("--frete-mesmo-uf", type=float)
-    ap.add_argument("--max-paginas", type=int, default=5,
-                    help="páginas de ofertas por edição (10 por página, mais baratas primeiro)")
+    ap.add_argument("--cep", help="calcula o frete real de cada vendedor escolhido para este CEP "
+                                  "(pelo carrinho da MYP, numa sessão anônima; nada é comprado)")
+    ap.add_argument("--max-paginas", type=int, default=10,
+                    help="limite de páginas por edição; a coleta para antes quando as próximas não podem compensar")
     ap.add_argument("--cookie-arquivo", default="cookie.txt")
     ap.add_argument("--token-arquivo", default="api_token.txt")
     ap.add_argument("--heuristica", action="store_true", help="não usar o solver exato")
@@ -47,13 +50,18 @@ def main():
             print(" ", msg)
             ultimo[0] = msg
 
-    itens = coletar(cli, texto, a.jogo, a.max_paginas, prog)
-    aplicar_filtros(itens, Filtros(
-        qualidade_min=a.qualidade_min,
-        idiomas=[x for x in a.idiomas.split(",") if x.strip()],
-        excluir=a.excluir.split(",")))
+    filtros = Filtros(qualidade_min=a.qualidade_min,
+                      idiomas=[x for x in a.idiomas.split(",") if x.strip()],
+                      excluir=a.excluir.split(","))
+    regra = RegraFrete(a.frete_padrao, a.frete_mesmo_uf, a.uf.upper() if a.uf else None)
+    itens, bloqueio = coletar(cli, texto, a.jogo, filtros, regra.maximo, a.max_paginas, prog)
+    if bloqueio:
+        print(f"! resultado parcial: {bloqueio}. Rode de novo depois; o cache guarda o que já foi lido.")
+    aplicar_filtros(itens, filtros, regra.maximo)
     for it in itens:
-        print(f"> {it.qtd}x {it.linha}: {len(it.produtos)} edições, {len(it.ofertas)} ofertas, "
+        com_oferta = sum(p.tem_oferta for p in it.produtos)
+        print(f"> {it.qtd}x {it.linha}: {com_oferta} edições com oferta, {it.paginas_lidas} páginas "
+              f"lidas, {len(it.ofertas)} ofertas válidas ({len(it.candidatas)} candidatas), "
               f"{it.disponivel} un." + (f"  [{it.aviso}]" if it.aviso else ""))
     ok = itens_atendiveis(itens)
     for it in itens:
@@ -62,10 +70,17 @@ def main():
     if not ok:
         sys.exit("Nada para otimizar.")
 
-    vend = carregar_vendedores(cli, ok)
-    regra = RegraFrete(a.frete_padrao, a.frete_mesmo_uf, a.uf.upper() if a.uf else None)
+    vend = carregar_vendedores(cli, ok, prog)
+    cotados = {}
+    if a.cep:
+        cotador = CotadorFrete(a.cep, log=lambda m: print(f"  ... {m}"))
+        res, cotados = otimizar_com_frete_real(ok, vend, regra, cotador,
+                                               usar_exato=not a.heuristica, progresso=prog)
+    else:
+        res = otimizar(ok, vend, regra, usar_exato=not a.heuristica)
+    if res is None:
+        sys.exit("Não foi possível montar um carrinho com essas cartas.")
     base = mais_barato_por_carta(ok, vend, regra)
-    res = otimizar(ok, vend, regra, usar_exato=not a.heuristica)
 
     for v in sorted(res.subtotais, key=lambda x: -res.subtotais[x]):
         vd = vend[v]
@@ -76,6 +91,11 @@ def main():
                       f"{o.idioma[:10]:<10} R$ {o.preco:>8.2f}")
         print(f"   subtotal R$ {res.subtotais[v]:.2f} + frete R$ {res.fretes[v]:.2f} "
               f"({'grátis' if not res.fretes[v] else regra.origem(vd)})")
+        fr = cotados.get(v)
+        if fr and fr.opcoes:
+            print("   opções de envio: " + " | ".join(f"{o.nome} R$ {o.preco:.2f}" for o in fr.opcoes))
+        elif fr and fr.erro:
+            print(f"   frete real indisponível: {fr.erro}")
     print(f"\nTOTAL R$ {res.total:.2f} (cartas R$ {res.cartas:.2f} + frete R$ {res.frete:.2f}, "
           f"{len(res.subtotais)} vendedores, {res.metodo})")
     if base:
