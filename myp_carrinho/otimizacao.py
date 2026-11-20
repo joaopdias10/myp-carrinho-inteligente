@@ -258,6 +258,10 @@ class RegraFrete:
     mesmo_uf: float | None = None
     uf: str | None = None
     reais: dict[str, float] = field(default_factory=dict)  # vendedor -> frete real (carrinho)
+    # Durante a cotação: teto para quem ainda não foi cotado (o menor frete real já visto), para
+    # que um vendedor com estimativa alta ainda tenha a chance de ser escolhido e cotado.
+    otimista: float | None = None
+    tentados: set[str] = field(default_factory=set)  # já passaram pela cotação: sem teto otimista
 
     def custo(self, v: Vendedor, subtotal: float) -> float:
         if v.frete_gratis_a_partir and subtotal >= v.frete_gratis_a_partir:
@@ -268,10 +272,14 @@ class RegraFrete:
         if v.nick in self.reais:
             return self.reais[v.nick]
         if v.frete_estimado is not None:
-            return v.frete_estimado
-        if self.uf and self.mesmo_uf is not None and v.uf == self.uf:
-            return self.mesmo_uf
-        return self.padrao
+            c = v.frete_estimado
+        elif self.uf and self.mesmo_uf is not None and v.uf == self.uf:
+            c = self.mesmo_uf
+        else:
+            c = self.padrao
+        if self.otimista is not None and v.nick not in self.tentados:
+            return min(c, self.otimista)
+        return c
 
     def origem(self, v: Vendedor) -> str:
         if v.nick in self.reais:

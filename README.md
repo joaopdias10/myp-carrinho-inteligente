@@ -94,7 +94,7 @@ Uma carta por linha, com a quantidade na frente. `#` inicia um comentário.
 3. **Coleta econômica**: o app abre primeiro a edição mais barata (pelo preço mínimo que a API informa) e só abre outra página ou edição enquanto ela ainda puder baratear o carrinho. O critério é o preço da unidade mais barata que passa nos filtros + o maior frete: uma oferta mais cara que isso não compensa nem para economizar um frete.
 4. **Vendedores**: da página de cada vendedor que pode entrar no carrinho saem a cidade/UF e o valor para frete grátis.
 5. **Otimização**: o app escolhe quantas unidades comprar de cada oferta para minimizar `Σ preços + Σ fretes dos vendedores usados`. Ele respeita o estoque e zera o frete de quem passar do valor de frete grátis.
-6. **Frete real** (opcional): para cada vendedor do carrinho escolhido, o app usa uma sessão **anônima** da MYP, nunca a sua conta. Ele adiciona uma carta ao carrinho, informa o CEP, lê as opções de envio e remove o item; nada é comprado. Com os valores reais, otimiza de novo, até o carrinho estabilizar. As cotações ficam em cache por 24 h.
+6. **Frete real** (opcional): para cada vendedor do carrinho escolhido, o app usa uma sessão **anônima** da MYP, nunca a sua conta. Ele adiciona uma carta ao carrinho, informa o CEP, lê as opções de envio e remove o item; nada é comprado. Com os valores reais, otimiza de novo, até o carrinho estabilizar. Nessa etapa, quem ainda não foi cotado entra com no máximo o menor frete real já visto. Assim, um vendedor com frete fixo barato não fica de fora só porque a estimativa dele era alta. As cotações ficam em cache por 24 h.
 
 Estrutura:
 

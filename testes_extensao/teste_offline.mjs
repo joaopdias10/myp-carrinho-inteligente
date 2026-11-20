@@ -14,7 +14,7 @@ import { Cliente, ErroMyp, lerOfertas, lerVendedor } from "../extensao/lib/myp.j
 import { lerCarrinho, opcoesDoHtml } from "../extensao/lib/frete.js";
 import {
   RegraFrete, aplicarFiltros, carregarVendedores, completar, exato, heuristica, itensAtendiveis,
-  lerLista, maisBaratoPorCarta, novoItem, otimizar, resolver,
+  lerLista, maisBaratoPorCarta, novoItem, otimizar, otimizarComFreteReal, resolver,
 } from "../extensao/lib/otimizador.js";
 import { montarResultado } from "../extensao/lib/resultado.js";
 
@@ -148,6 +148,31 @@ class ClienteCache extends Cliente {
     if (h.total > inst.heuristica + 0.006) piorQueHeuristicaPy++;
   }
   console.log(`5. ${ref.instancias.length} instâncias sintéticas: exato igual ao Python em ${iguais}; busca local JS pior que a do Python em ${piorQueHeuristicaPy}`);
+}
+
+// ------------------------------------------------------------------ 6. frete real: vendedor com estimativa alta
+// Caso real (Yu-Gi-Oh!): logado, a MYP estima ~R$ 45 de frete para todos, mas no carrinho vários têm
+// frete fixo bem menor. A RollCard (3 un. a R$ 2,99, frete real R$ 15) precisa ser cotada e escolhida.
+{
+  const oferta = (id, vendedor, preco, quantidade) => ({ idEstoque: id, idProduto: 1, vendedor, preco, quantidade,
+    qualidade: "NM", idioma: "Português", printing: null });
+  const fera = { ...novoItem("3 Fera", 3), todasOfertas: [oferta(1, "xNewbe", 1, 1), oferta(2, "Franklin", 1, 1),
+    oferta(3, "Bortolatto", 1, 1), oferta(4, "TBCorp", 2.49, 3), oferta(5, "RollCard", 2.99, 3)] };
+  const ponte = { ...novoItem("1 Ponte", 1), todasOfertas: [oferta(6, "Bortolatto", 2, 1)] };
+  const itens = [fera, ponte];
+  aplicarFiltros(itens, { qualidadeMin: "NM" }, null);
+  const reais = { xNewbe: 18, Franklin: 32.4, Bortolatto: 19, TBCorp: 40, RollCard: 15 };
+  const vend = Object.fromEntries(Object.keys(reais).map((n) => [n, { nick: n, cidade: null, freteGratisAPartir: null, freteEstimado: 45 }]));
+  const pedidos = [];
+  const cotador = { cotar: async (amostras) => Object.fromEntries(Object.keys(amostras).map((v) => {
+    pedidos.push(v);
+    return [v, { vendedor: v, erro: null, opcoes: [{ nome: "Frete Fixo", preco: reais[v], prazo: "" }] }];
+  })) };
+  const regra = new RegraFrete({ padrao: 20 });
+  const { res } = await otimizarComFreteReal(itens, vend, regra, cotador, highs);
+  console.log(`6. frete real com estimativa alta: R$ ${res.total.toFixed(2)} com ${Object.keys(res.subtotais).join(", ")}; cotados: ${pedidos.join(", ")}`);
+  confere(quase(res.total, 42.98) && "RollCard" in res.subtotais, "não escolheu a RollCard (esperado R$ 42,98)");
+  confere(Object.keys(res.subtotais).every((v) => v in regra.reais), "carrinho final com vendedor sem frete real");
 }
 
 console.log(falhas ? `\n${falhas} verificação(ões) falharam` : "\nTudo confere com o Python.");
