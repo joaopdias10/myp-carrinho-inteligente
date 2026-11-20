@@ -11,6 +11,7 @@ const lista = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
 const enviar = (msg) => chrome.runtime.sendMessage({ para: "bg", ...msg });
 
 let estado = { fase: "parado" };
+try { $("versao").textContent = `Versão ${chrome.runtime.getManifest().version}.`; } catch { /* prévia fora do Chrome */ }
 
 // ------------------------------------------------------------------ configuração salva
 async function carregarConfig() {

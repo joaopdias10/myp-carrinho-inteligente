@@ -358,6 +358,8 @@ export async function otimizarComFreteReal(itens, vendedores, regra, cotador, hi
         cotados[v] = fr;
         const m = melhorOpcao(fr);
         if (m) regra.reais[v] = m.preco;
+        cotador.cli?.log?.(m ? `frete real de ${v}: R$ ${m.preco.toFixed(2).replace(".", ",")} (${m.nome})`
+          : `frete real de ${v}: sem valor (${fr.erro || "sem opções"})`);
       }
       for (const v of semReal) regra.tentados.add(v);
     } catch (e) {
