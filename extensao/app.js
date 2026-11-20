@@ -13,7 +13,7 @@ const chave = (s) => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLower
 
 // filtros de múltipla escolha: opções = sugestões + o que apareceu nas ofertas da última busca
 const MULTI = {
-  idiomas: { sugestoes: ["Português", "Inglês", "Japonês", "Espanhol", "Coreano", "Chinês", "Italiano", "Francês", "Alemão"],
+  idiomas: { sugestoes: ["Português", "Inglês", "Japonês"], // as mesmas do app antes da primeira busca
     vistos: (r) => r.itens.flatMap((it) => it.ofertas.map((o) => o.idioma)) },
   printingsExcluir: { sugestoes: [],
     vistos: (r) => r.itens.flatMap((it) => it.ofertas.flatMap((o) => etiquetas(o.printing))) },
@@ -46,36 +46,44 @@ function lerConfig() {
   };
 }
 
-// ------------------------------------------------------------------ seleção múltipla (como o multiselect do app)
-// Uma caixa com as escolhidas (× tira) e um campo que abre a lista das opções; clicar ou Enter adiciona.
+// ------------------------------------------------------------------ seleção múltipla (igual ao st.multiselect do app)
+// Caixa com as escolhidas (× tira uma; o × da direita tira todas) e ▾ que abre a lista;
+// a lista começa com "Selecionar todos" e as escolhidas saem dela.
 const opcoesMulti = { idiomas: [], printingsExcluir: [] };
-const PLACEHOLDER = { idiomas: ["Todos", "Adicionar idioma…"], printingsExcluir: ["Nenhuma", "Adicionar impressão…"] };
+const PLACEHOLDER = { idiomas: "Todos", printingsExcluir: "Nenhuma" };
 
 async function salvarMulti(c) {
   desenharMulti(c);
   await chrome.storage.local.set({ config: lerConfig() });
 }
 
-function adicionar(c, v) {
-  v = v.trim();
-  if (!v || [...selecionados[c]].some((x) => chave(x) === chave(v))) return;
-  selecionados[c].add(v);
+function adicionar(c, vs) {
+  for (let v of vs) {
+    v = v.trim();
+    if (v && ![...selecionados[c]].some((x) => chave(x) === chave(v))) selecionados[c].add(v);
+  }
   salvarMulti(c);
 }
 
 function remover(c, v) {
-  selecionados[c].delete(v);
+  if (v == null) selecionados[c].clear();
+  else selecionados[c].delete(v);
   salvarMulti(c);
 }
+
+const SETA = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function montarMulti(c) {
   const raiz = $(c);
   raiz.innerHTML = `<div class="multi-caixa"><span class="multi-tags"></span>
-    <input class="multi-entrada" autocomplete="off" role="combobox" aria-expanded="false"></div>
+    <input class="multi-entrada" autocomplete="off" role="combobox" aria-expanded="false">
+    <span class="multi-icones"><button type="button" class="multi-limpar" aria-label="Tirar todos" hidden>×</button>
+    <span class="multi-seta">${SETA}</span></span></div>
     <ul class="multi-lista" role="listbox" hidden></ul>`;
   const entrada = raiz.querySelector(".multi-entrada");
   const listaEl = raiz.querySelector(".multi-lista");
   let ativo = 0;
+  const aberta = () => !listaEl.hidden;
   const visiveis = () => {
     const f = chave(entrada.value.trim());
     const ja = new Set([...selecionados[c]].map(chave));
@@ -83,48 +91,67 @@ function montarMulti(c) {
   };
   const abrir = () => {
     const vs = visiveis();
-    ativo = Math.min(ativo, Math.max(vs.length - 1, 0));
     const digitado = entrada.value.trim();
-    const extra = digitado && !vs.some((v) => chave(v) === chave(digitado)) && ![...selecionados[c]].some((x) => chave(x) === chave(digitado));
-    listaEl.innerHTML = vs.map((v, k) => `<li role="option" data-v="${esc(v)}"${k === ativo ? ' class="ativo"' : ""}>${esc(v)}</li>`).join("")
-      + (extra ? `<li role="option" data-v="${esc(digitado)}" class="novo${vs.length ? "" : " ativo"}">Adicionar “${esc(digitado)}”</li>` : "")
-      + (!vs.length && !extra ? `<li class="vazio">${opcoesMulti[c].length ? "Nada mais para adicionar" : "Digite e tecle Enter"}</li>` : "");
+    // impressões: antes da primeira busca não há opções, então aceita o que for digitado
+    const extra = c === "printingsExcluir" && digitado && !vs.some((v) => chave(v) === chave(digitado))
+      && ![...selecionados[c]].some((x) => chave(x) === chave(digitado));
+    const ops = [
+      ...(vs.length > 1 ? [{ todos: true, rotulo: "Selecionar todos" }] : []),
+      ...vs.map((v) => ({ v, rotulo: v })),
+      ...(extra ? [{ v: digitado, rotulo: `Adicionar “${digitado}”` }] : []),
+    ];
+    ativo = Math.min(ativo, Math.max(ops.length - 1, 0));
+    listaEl.innerHTML = ops.length
+      ? ops.map((o, k) => `<li role="option" class="op${k === ativo ? " ativo" : ""}"${o.todos ? " data-todos" : ` data-v="${esc(o.v)}"`}>${esc(o.rotulo)}</li>`).join("")
+      : `<li class="vazio">${opcoesMulti[c].length ? "Sem mais opções" : c === "printingsExcluir" ? "Sem opções ainda: digite e tecle Enter" : "Sem resultados"}</li>`;
     listaEl.hidden = false;
+    raiz.classList.add("aberta");
     entrada.setAttribute("aria-expanded", "true");
   };
-  const fechar = () => { listaEl.hidden = true; entrada.setAttribute("aria-expanded", "false"); };
-  raiz._abrir = () => { if (!listaEl.hidden) abrir(); };
+  const fechar = () => {
+    listaEl.hidden = true;
+    raiz.classList.remove("aberta");
+    entrada.setAttribute("aria-expanded", "false");
+  };
+  const escolher = (li) => {
+    if (!li) return;
+    adicionar(c, li.hasAttribute("data-todos") ? visiveis() : [li.dataset.v]);
+    entrada.value = "";
+    ativo = 0;
+    if (aberta()) abrir();
+  };
+  raiz._abrir = () => { if (aberta()) abrir(); };
 
   raiz.querySelector(".multi-caixa").addEventListener("mousedown", (ev) => {
-    const x = ev.target.closest("button[data-v]");
     ev.preventDefault();
-    if (x) remover(c, x.dataset.v);
+    const x = ev.target.closest(".multi-tag button");
+    if (x) { remover(c, x.dataset.v); entrada.focus(); return; }
+    if (ev.target.closest(".multi-limpar")) { remover(c, null); entrada.focus(); return; }
+    if (ev.target.closest(".multi-seta") && aberta()) { fechar(); return; }
     entrada.focus();
     abrir();
   });
   entrada.addEventListener("focus", abrir);
   entrada.addEventListener("blur", fechar);
   entrada.addEventListener("input", () => { ativo = 0; abrir(); });
-  listaEl.addEventListener("mousedown", (ev) => {
-    ev.preventDefault();
-    const li = ev.target.closest("li[data-v]");
+  listaEl.addEventListener("mousedown", (ev) => { ev.preventDefault(); escolher(ev.target.closest("li.op")); });
+  listaEl.addEventListener("mousemove", (ev) => {
+    const li = ev.target.closest("li.op");
     if (!li) return;
-    adicionar(c, li.dataset.v);
-    entrada.value = "";
-    abrir();
+    ativo = [...listaEl.querySelectorAll("li.op")].indexOf(li);
+    listaEl.querySelectorAll("li.op").forEach((x) => x.classList.toggle("ativo", x === li));
   });
   entrada.addEventListener("keydown", (ev) => {
-    const itens = [...listaEl.querySelectorAll("li[data-v]")];
+    const itens = [...listaEl.querySelectorAll("li.op")];
     if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
       ev.preventDefault();
-      if (listaEl.hidden) return abrir();
+      if (!aberta()) return abrir();
       ativo = (ativo + (ev.key === "ArrowDown" ? 1 : -1) + itens.length) % Math.max(itens.length, 1);
       itens.forEach((li, k) => li.classList.toggle("ativo", k === ativo));
       itens[ativo]?.scrollIntoView({ block: "nearest" });
     } else if (ev.key === "Enter") {
       ev.preventDefault(); // não envia o formulário
-      const li = listaEl.hidden ? null : (listaEl.querySelector("li.ativo[data-v]") || itens[0]);
-      if (li) { adicionar(c, li.dataset.v); entrada.value = ""; ativo = 0; abrir(); }
+      if (aberta()) escolher(listaEl.querySelector("li.op.ativo") || itens[0]);
     } else if (ev.key === "Escape") {
       fechar();
     } else if (ev.key === "Backspace" && !entrada.value && selecionados[c].size) {
@@ -133,16 +160,17 @@ function montarMulti(c) {
   });
 }
 
-/** Atualiza as escolhidas e as opções (sugestões + o que apareceu nas ofertas da última busca). */
+/** Atualiza as escolhidas e as opções: o que apareceu nas ofertas da última busca (ou as sugestões). */
 function desenharMulti(c) {
   const vistos = estado.resultado ? MULTI[c].vistos(estado.resultado) : [];
   const porChave = new Map();
-  for (const v of [...MULTI[c].sugestoes, ...vistos]) if (v && !porChave.has(chave(v))) porChave.set(chave(v), v);
-  opcoesMulti[c] = [...porChave.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  for (const v of vistos) if (v && !porChave.has(chave(v))) porChave.set(chave(v), v);
+  opcoesMulti[c] = porChave.size ? [...porChave.values()].sort((a, b) => a.localeCompare(b, "pt-BR")) : [...MULTI[c].sugestoes];
   const raiz = $(c);
   raiz.querySelector(".multi-tags").innerHTML = [...selecionados[c]].map((v) =>
     `<span class="multi-tag">${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="Tirar ${esc(v)}">×</button></span>`).join("");
-  raiz.querySelector(".multi-entrada").placeholder = PLACEHOLDER[c][selecionados[c].size ? 1 : 0];
+  raiz.querySelector(".multi-entrada").placeholder = selecionados[c].size ? "" : PLACEHOLDER[c];
+  raiz.querySelector(".multi-limpar").hidden = !selecionados[c].size;
   raiz._abrir();
   if (c === "printingsExcluir") $("dicaImpressoes").hidden = opcoesMulti[c].length > 0;
 }

@@ -60,19 +60,23 @@ tr.invalida td { color: var(--suave); }
 .rotulo { display: block; font-weight: 500; margin-bottom: 6px; }
 .rotulo small { color: var(--suave); font-weight: 400; }
 .multi { position: relative; }
-.multi-caixa { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 38px; padding: 4px 6px;
-  background: var(--fundo); border: 1px solid var(--borda); border-radius: 6px; cursor: text; }
-.multi-caixa:focus-within { border-color: var(--destaque); }
+.multi-caixa { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 42px;
+  padding: 5px 64px 5px 8px; background: var(--fundo); border: 1px solid var(--borda); border-radius: 8px; cursor: pointer; }
+.multi.aberta .multi-caixa, .multi-caixa:focus-within { border-color: var(--destaque); }
 .multi-tags { display: contents; }
-.multi-tag { display: inline-flex; align-items: center; gap: 4px; background: var(--destaque); color: var(--destaque-texto);
-  border-radius: 4px; padding: 2px 4px 2px 8px; font-size: .88rem; }
-.multi-tag button { background: transparent; color: inherit; padding: 0 4px; font-size: 1rem; line-height: 1; border-radius: 3px; }
+.multi-tag { display: inline-flex; align-items: center; gap: 2px; background: var(--destaque); color: var(--destaque-texto);
+  border-radius: 6px; padding: 2px 2px 2px 9px; font-size: .9rem; line-height: 1.5; }
+.multi-tag button { background: transparent; color: inherit; padding: 0 6px; font-size: 1rem; line-height: 1; border-radius: 4px; font-weight: 400; }
 .multi-tag button:hover { background: rgba(0, 0, 0, .18); }
-.multi-entrada { flex: 1; min-width: 140px; border: 0; padding: 4px; background: transparent; outline: none; }
-.multi-lista { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px 0; list-style: none;
-  max-height: 240px; overflow: auto; background: var(--cartao); border: 1px solid var(--borda); border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
-.multi-lista li { padding: 6px 12px; cursor: pointer; }
-.multi-lista li.ativo, .multi-lista li[data-v]:hover { background: var(--chip); }
-.multi-lista li.novo { font-style: italic; }
+.multi-entrada { flex: 1; min-width: 80px; border: 0; padding: 4px 2px; background: transparent; outline: none; cursor: pointer; }
+.multi-icones { position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center; gap: 2px; color: var(--suave); }
+.multi-limpar { background: transparent; color: inherit; padding: 0 6px; font-size: 1.15rem; font-weight: 400; line-height: 1; }
+.multi-limpar:hover, .multi-seta:hover { color: var(--texto); }
+.multi-seta { display: flex; transition: transform .15s; }
+.multi.aberta .multi-seta { transform: rotate(180deg); }
+.multi-lista { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 6px 0; list-style: none;
+  max-height: 300px; overflow: auto; background: var(--cartao); border: 1px solid var(--borda); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .25); }
+.multi-lista li { padding: 9px 14px; cursor: pointer; }
+.multi-lista li.ativo { background: var(--chip); }
 .multi-lista li.vazio { color: var(--suave); cursor: default; }
