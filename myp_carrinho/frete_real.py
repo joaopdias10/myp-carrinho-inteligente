@@ -222,23 +222,27 @@ class CotadorFrete:
 
 
 def otimizar_com_frete_real(itens, vendedores, regra, cotador: CotadorFrete,
-                            usar_exato: bool = True, max_rodadas: int = 4,
+                            usar_exato: bool = True, max_rodadas: int = 8,
                             progresso: Callable[[float, str], None] | None = None):
     """Otimiza, cota o frete real dos vendedores escolhidos e otimiza de novo, até que
     todo vendedor do carrinho tenha frete real (ou acabem as rodadas).
+    Quem ainda não foi cotado entra com no máximo o menor frete real já visto: muitos vendedores
+    têm frete fixo bem abaixo do PAC/estimativa e, sem isso, nunca seriam escolhidos para cotar.
     Preenche `regra.reais` e devolve (resultado, {vendedor: FreteReal})."""
     from .otimizacao import otimizar
 
     cotados: dict[str, FreteReal] = {}
     for nick, fr in cotador.cache.items():  # o que já está no cache entra de graça
-        if nick in vendedores and fr.melhor:
-            regra.reais[nick] = fr.melhor.preco
+        if nick in vendedores:
             cotados[nick] = fr
-    res = None
-    for rodada in range(max_rodadas):
+            regra.tentados.add(nick)
+            if fr.melhor:
+                regra.reais[nick] = fr.melhor.preco
+    for _ in range(max_rodadas):
+        regra.otimista = min(regra.reais.values()) if regra.reais else None
         res = otimizar(itens, vendedores, regra, usar_exato=usar_exato)
         if res is None:
-            return None, cotados
+            break
         sem_real = [v for v in res.subtotais if v not in cotados]
         if not sem_real:
             break
@@ -258,7 +262,7 @@ def otimizar_com_frete_real(itens, vendedores, regra, cotador: CotadorFrete,
             cotados[v] = fr
             if fr.melhor:
                 regra.reais[v] = fr.melhor.preco
-    else:
-        return res, cotados
-    # interrompido: recalcula com o que se sabe (reais onde houver, suposto no resto)
+        regra.tentados.update(sem_real)
+    # resultado final com os valores de verdade: real onde houver, estimado/suposto no resto
+    regra.otimista = None
     return otimizar(itens, vendedores, regra, usar_exato=usar_exato), cotados

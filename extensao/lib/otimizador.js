@@ -172,12 +172,17 @@ export class RegraFrete {
     this.mesmoUf = mesmoUf;
     this.uf = uf;
     this.reais = {}; // nick -> frete real (carrinho)
+    // Durante a cotação: teto para quem ainda não foi cotado (o menor frete real já visto), para
+    // que um vendedor com estimativa alta ainda tenha a chance de ser escolhido e cotado.
+    this.otimista = null;
+    this.tentados = new Set(); // já passaram pela cotação (com ou sem sucesso): sem teto otimista
   }
   custoBase(v) {
     if (v.nick in this.reais) return this.reais[v.nick];
-    if (v.freteEstimado != null) return v.freteEstimado;
-    if (this.uf && this.mesmoUf != null && ufDe(v) === this.uf) return this.mesmoUf;
-    return this.padrao;
+    let c = this.padrao;
+    if (v.freteEstimado != null) c = v.freteEstimado;
+    else if (this.uf && this.mesmoUf != null && ufDe(v) === this.uf) c = this.mesmoUf;
+    return this.otimista != null && !this.tentados.has(v.nick) ? Math.min(c, this.otimista) : c;
   }
   custo(v, subtotal) {
     if (v.freteGratisAPartir && subtotal >= v.freteGratisAPartir) return 0;
@@ -325,16 +330,22 @@ export const itensAtendiveis = (itens) => itens.filter((it) => disponivel(it) >=
 
 // ================================================================ frete real
 
-/** Otimiza, cota o frete real dos vendedores escolhidos e otimiza de novo (até 4 rodadas). */
-export async function otimizarComFreteReal(itens, vendedores, regra, cotador, highs = null, progresso = () => {}, maxRodadas = 4) {
+/**
+ * Otimiza, cota o frete real dos vendedores escolhidos e otimiza de novo, até que todos os
+ * vendedores do carrinho tenham frete real (ou acabem as rodadas).
+ * Quem ainda não foi cotado entra com no máximo o menor frete real já visto: muitos vendedores
+ * têm frete fixo bem abaixo do PAC/estimativa, e sem isso eles nunca seriam escolhidos para cotar.
+ */
+export async function otimizarComFreteReal(itens, vendedores, regra, cotador, highs = null, progresso = () => {}, maxRodadas = 8) {
   const cotados = {};
-  let res = null;
   let interrompido = null;
   for (let r = 0; r < maxRodadas; r++) {
-    res = otimizar(itens, vendedores, regra, highs);
-    if (!res) return { res: null, cotados, interrompido };
+    const reais = Object.values(regra.reais);
+    regra.otimista = reais.length ? Math.min(...reais) : null;
+    const res = otimizar(itens, vendedores, regra, highs);
+    if (!res) break;
     const semReal = Object.keys(res.subtotais).filter((v) => !(v in cotados));
-    if (!semReal.length) return { res, cotados, interrompido };
+    if (!semReal.length) break;
     const amostras = {};
     for (const v of semReal) { // a oferta mais barata de cada vendedor serve de amostra
       let menor = null;
@@ -348,6 +359,7 @@ export async function otimizarComFreteReal(itens, vendedores, regra, cotador, hi
         const m = melhorOpcao(fr);
         if (m) regra.reais[v] = m.preco;
       }
+      for (const v of semReal) regra.tentados.add(v);
     } catch (e) {
       if (!(e instanceof BloqueioMyp)) throw e;
       interrompido = e.message;
@@ -355,6 +367,8 @@ export async function otimizarComFreteReal(itens, vendedores, regra, cotador, hi
       break;
     }
   }
+  // resultado final com os valores de verdade: real onde houver, estimado/suposto no resto
+  regra.otimista = null;
   return { res: otimizar(itens, vendedores, regra, highs), cotados, interrompido };
 }
 
