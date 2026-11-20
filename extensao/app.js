@@ -223,6 +223,25 @@ $("form").addEventListener("submit", async (ev) => {
 
 $("cancelar").addEventListener("click", () => enviar({ tipo: "cancelar" }));
 
+$("copiarDiagnostico").addEventListener("click", async () => {
+  let versao = "?";
+  try { versao = chrome.runtime.getManifest().version; } catch { /* prévia */ }
+  const r = estado.resultado;
+  const txt = [
+    `Versão ${versao}`,
+    "--- Registro", ...(estado.log || []),
+    "--- Fretes cotados", ...(r?.cotacoes || []).map((x) => `${x.nick}: ${x.frete != null ? `${x.frete} (${x.opcao})` : `ERRO ${x.erro}`}${x.noCarrinho ? " [no resultado]" : ""}`),
+    "--- Carrinho", ...(r?.carrinho?.vendedores || []).map((v) => `${v.nick}: cartas ${v.subtotal} frete ${v.frete} (${v.origem})`),
+  ].join("\n");
+  try {
+    await navigator.clipboard.writeText(txt);
+    $("copiarDiagnostico").textContent = "Copiado!";
+    setTimeout(() => { $("copiarDiagnostico").textContent = "Copiar diagnóstico"; }, 2000);
+  } catch {
+    $("log").textContent = txt; // sem acesso à área de transferência: mostra para copiar à mão
+  }
+});
+
 $("limparCache").addEventListener("click", async () => {
   await caches.delete("myp-v1");
   alert("Cache limpo. A próxima busca baixa as páginas de novo.");
@@ -303,6 +322,15 @@ function desenharCarrinho(r) {
       ${v.linhas.map((l) => `<tr><td class="num">${l.qtd}</td><td><a href="${esc(l.link)}" target="_blank" rel="noopener">${esc(l.carta)}</a></td>
         <td>${esc(l.qualidade)}</td><td>${esc(l.idioma)}</td><td>${esc(l.printing || "")}</td><td class="num">${brl(l.preco)}</td></tr>`).join("")}
       </tbody></table></div></section>`;
+  }
+  const cot = r.cotacoes || [];
+  if (cot.length) {
+    const falhas = cot.filter((x) => x.erro).length;
+    h += `<details class="cartao"${falhas ? " open" : ""}><summary>Fretes cotados no carrinho da MYP (${cot.length}${falhas ? `, ${falhas} com erro` : ""})</summary>
+      <div class="tabela"><table><thead><tr><th>Vendedor</th><th class="num">Frete</th><th>Opção / erro</th><th>No resultado</th></tr></thead><tbody>
+      ${cot.map((x) => `<tr><td>${esc(x.nick)}</td><td class="num">${brl(x.frete)}</td>
+        <td${x.erro ? ' class="erro"' : ""}>${esc(x.erro || x.opcao || "")}</td><td>${x.noCarrinho ? "sim" : ""}</td></tr>`).join("")}
+      </tbody></table></div></details>`;
   }
   $("aba-carrinho").innerHTML = h;
   $("colocar").addEventListener("click", () => {

@@ -106,7 +106,8 @@ async function executar(p) {
       }
       const r = await otimizarComFreteReal(ok, vendedores, regra, cot, highs, progresso("Calculando o frete real", 0.2, 0.8));
       res = r.res;
-      cotados = r.cotados;
+      // inclui as cotações reaproveitadas de buscas anteriores, para aparecerem em "Fretes cotados"
+      cotados = { ...Object.fromEntries([...cot.cache].filter(([nick]) => nick in vendedores)), ...r.cotados };
       bloqueio ??= r.interrompido;
     } else {
       emitir({ progresso: 0.9, mensagem: "Calculando a melhor combinação" });

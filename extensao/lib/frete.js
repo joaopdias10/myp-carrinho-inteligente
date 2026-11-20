@@ -98,9 +98,10 @@ export class CotadorFrete {
         const txt = await this.cli.http(`/carrinho/adicionar?idestoque=${idEstoque}&qtd=1&override=0`,
           { ajax: true, usaCache: false });
         let cod = null;
-        try { cod = JSON.parse(txt).errCode; } catch { /* resposta inesperada */ }
+        let msg = "";
+        try { ({ errCode: cod, errmessage: msg = "" } = JSON.parse(txt)); } catch { msg = txt.slice(0, 120); }
         if (cod === 1 || cod === 5) adicionados.push(idEstoque);
-        else this.cache.set(v, { vendedor: v, opcoes: [], erro: `não consegui pôr no carrinho (código ${cod})` });
+        else this.cache.set(v, { vendedor: v, opcoes: [], erro: `não consegui pôr no carrinho (código ${cod}${msg ? `: ${msg}` : ""})` });
       }
       let { csrf } = await this._carrinho();
       if (this.cep) {
@@ -114,6 +115,7 @@ export class CotadorFrete {
         let raiz = loja.el;
         const provedores = new Set([...loja.el.querySelectorAll("input[data-provedor-frete]")]
           .map((i) => i.getAttribute("data-provedor-frete")).filter(Boolean));
+        if (!provedores.size) provedores.add("Correios"); // sem opções no HTML: pede o cálculo mesmo assim
         for (const prov of provedores) {
           const txt = await this.cli.http(`/carrinho/atualizar-frete?t=${Date.now()}`, {
             metodo: "POST", ajax: true, csrf, usaCache: false,
@@ -125,10 +127,13 @@ export class CotadorFrete {
           } catch { /* mantém o HTML do carrinho */ }
         }
         const opcoes = opcoesDoHtml(raiz);
-        this.cache.set(loja.nick, { vendedor: loja.nick, opcoes, erro: opcoes.length ? null : "vendedor sem frete com preço" });
+        const trecho = opcoes.length ? "" : (raiz.textContent || "").replace(/\s+/g, " ").match(/Formas de envio.{0,160}/)?.[0] || "";
+        this.cache.set(loja.nick, { vendedor: loja.nick, opcoes,
+          erro: opcoes.length ? null : `vendedor sem frete com preço${trecho ? ` (${trecho})` : ""}` });
       }
+      const nicks = depois.lojas.map((l) => l.nick).join(", ");
       for (const v of Object.keys(lote)) {
-        if (!this.cache.has(v)) this.cache.set(v, { vendedor: v, opcoes: [], erro: "vendedor não apareceu no carrinho" });
+        if (!this.cache.has(v)) this.cache.set(v, { vendedor: v, opcoes: [], erro: `vendedor não apareceu no carrinho (lojas lidas: ${nicks || "nenhuma"})` });
       }
     } finally {
       if (adicionados.length) {

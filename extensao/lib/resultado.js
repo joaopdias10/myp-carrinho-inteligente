@@ -1,5 +1,6 @@
 // Converte o resultado da otimização num objeto simples (JSON) para a página do app.
 import { BASE } from "./myp.js";
+import { melhorOpcao } from "./frete.js";
 import { disponivel, linkProduto, nomeProduto } from "./otimizador.js";
 
 export function montarResultado(itens, ok, res, base, vendedores, regra, cotados) {
@@ -26,6 +27,11 @@ export function montarResultado(itens, ok, res, base, vendedores, regra, cotados
     })),
     carrinho: null,
   };
+  out.cotacoes = Object.entries(cotados).map(([nick, fr]) => {
+    const m = melhorOpcao(fr);
+    return { nick, frete: m?.preco ?? null, opcao: m?.nome ?? null, erro: m ? null : (fr.erro || "sem opções de envio"),
+      noCarrinho: Boolean(res && nick in res.subtotais) };
+  }).sort((a, b) => a.nick.localeCompare(b.nick));
   if (!res) return out;
   out.carrinho = {
     total: res.total, cartas: res.cartas, frete: res.frete, metodo: res.metodo,
