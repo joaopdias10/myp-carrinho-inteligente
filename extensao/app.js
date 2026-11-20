@@ -46,27 +46,108 @@ function lerConfig() {
   };
 }
 
-/** Desenha as opções de um filtro de múltipla escolha, mantendo o que está marcado. */
-function desenharOpcoes(c) {
-  const vistos = estado.resultado ? MULTI[c].vistos(estado.resultado) : [];
-  const porChave = new Map();
-  for (const v of [...MULTI[c].sugestoes, ...vistos, ...selecionados[c]]) {
-    if (v && !porChave.has(chave(v))) porChave.set(chave(v), v);
-  }
-  const marcadas = new Set([...selecionados[c]].map(chave));
-  const opcoes = [...porChave.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  $(c).innerHTML = opcoes.map((v) => `<label class="opcao"><input type="checkbox" value="${esc(v)}"${marcadas.has(chave(v)) ? " checked" : ""}> ${esc(v)}</label>`).join("");
-  if (c === "printingsExcluir") $("dicaImpressoes").hidden = opcoes.length > 0;
+// ------------------------------------------------------------------ seleção múltipla (como o multiselect do app)
+// Uma caixa com as escolhidas (× tira) e um campo que abre a lista das opções; clicar ou Enter adiciona.
+const opcoesMulti = { idiomas: [], printingsExcluir: [] };
+const PLACEHOLDER = { idiomas: ["Todos", "Adicionar idioma…"], printingsExcluir: ["Nenhuma", "Adicionar impressão…"] };
+
+async function salvarMulti(c) {
+  desenharMulti(c);
+  await chrome.storage.local.set({ config: lerConfig() });
 }
 
-for (const c of Object.keys(MULTI)) {
-  $(c).addEventListener("change", async (ev) => {
-    const v = ev.target.value;
-    for (const x of [...selecionados[c]]) if (chave(x) === chave(v)) selecionados[c].delete(x);
-    if (ev.target.checked) selecionados[c].add(v);
-    await chrome.storage.local.set({ config: lerConfig() });
+function adicionar(c, v) {
+  v = v.trim();
+  if (!v || [...selecionados[c]].some((x) => chave(x) === chave(v))) return;
+  selecionados[c].add(v);
+  salvarMulti(c);
+}
+
+function remover(c, v) {
+  selecionados[c].delete(v);
+  salvarMulti(c);
+}
+
+function montarMulti(c) {
+  const raiz = $(c);
+  raiz.innerHTML = `<div class="multi-caixa"><span class="multi-tags"></span>
+    <input class="multi-entrada" autocomplete="off" role="combobox" aria-expanded="false"></div>
+    <ul class="multi-lista" role="listbox" hidden></ul>`;
+  const entrada = raiz.querySelector(".multi-entrada");
+  const listaEl = raiz.querySelector(".multi-lista");
+  let ativo = 0;
+  const visiveis = () => {
+    const f = chave(entrada.value.trim());
+    const ja = new Set([...selecionados[c]].map(chave));
+    return opcoesMulti[c].filter((v) => !ja.has(chave(v)) && (!f || chave(v).includes(f)));
+  };
+  const abrir = () => {
+    const vs = visiveis();
+    ativo = Math.min(ativo, Math.max(vs.length - 1, 0));
+    const digitado = entrada.value.trim();
+    const extra = digitado && !vs.some((v) => chave(v) === chave(digitado)) && ![...selecionados[c]].some((x) => chave(x) === chave(digitado));
+    listaEl.innerHTML = vs.map((v, k) => `<li role="option" data-v="${esc(v)}"${k === ativo ? ' class="ativo"' : ""}>${esc(v)}</li>`).join("")
+      + (extra ? `<li role="option" data-v="${esc(digitado)}" class="novo${vs.length ? "" : " ativo"}">Adicionar “${esc(digitado)}”</li>` : "")
+      + (!vs.length && !extra ? `<li class="vazio">${opcoesMulti[c].length ? "Nada mais para adicionar" : "Digite e tecle Enter"}</li>` : "");
+    listaEl.hidden = false;
+    entrada.setAttribute("aria-expanded", "true");
+  };
+  const fechar = () => { listaEl.hidden = true; entrada.setAttribute("aria-expanded", "false"); };
+  raiz._abrir = () => { if (!listaEl.hidden) abrir(); };
+
+  raiz.querySelector(".multi-caixa").addEventListener("mousedown", (ev) => {
+    const x = ev.target.closest("button[data-v]");
+    ev.preventDefault();
+    if (x) remover(c, x.dataset.v);
+    entrada.focus();
+    abrir();
+  });
+  entrada.addEventListener("focus", abrir);
+  entrada.addEventListener("blur", fechar);
+  entrada.addEventListener("input", () => { ativo = 0; abrir(); });
+  listaEl.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    const li = ev.target.closest("li[data-v]");
+    if (!li) return;
+    adicionar(c, li.dataset.v);
+    entrada.value = "";
+    abrir();
+  });
+  entrada.addEventListener("keydown", (ev) => {
+    const itens = [...listaEl.querySelectorAll("li[data-v]")];
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      if (listaEl.hidden) return abrir();
+      ativo = (ativo + (ev.key === "ArrowDown" ? 1 : -1) + itens.length) % Math.max(itens.length, 1);
+      itens.forEach((li, k) => li.classList.toggle("ativo", k === ativo));
+      itens[ativo]?.scrollIntoView({ block: "nearest" });
+    } else if (ev.key === "Enter") {
+      ev.preventDefault(); // não envia o formulário
+      const li = listaEl.hidden ? null : (listaEl.querySelector("li.ativo[data-v]") || itens[0]);
+      if (li) { adicionar(c, li.dataset.v); entrada.value = ""; ativo = 0; abrir(); }
+    } else if (ev.key === "Escape") {
+      fechar();
+    } else if (ev.key === "Backspace" && !entrada.value && selecionados[c].size) {
+      remover(c, [...selecionados[c]].at(-1));
+    }
   });
 }
+
+/** Atualiza as escolhidas e as opções (sugestões + o que apareceu nas ofertas da última busca). */
+function desenharMulti(c) {
+  const vistos = estado.resultado ? MULTI[c].vistos(estado.resultado) : [];
+  const porChave = new Map();
+  for (const v of [...MULTI[c].sugestoes, ...vistos]) if (v && !porChave.has(chave(v))) porChave.set(chave(v), v);
+  opcoesMulti[c] = [...porChave.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const raiz = $(c);
+  raiz.querySelector(".multi-tags").innerHTML = [...selecionados[c]].map((v) =>
+    `<span class="multi-tag">${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="Tirar ${esc(v)}">×</button></span>`).join("");
+  raiz.querySelector(".multi-entrada").placeholder = PLACEHOLDER[c][selecionados[c].size ? 1 : 0];
+  raiz._abrir();
+  if (c === "printingsExcluir") $("dicaImpressoes").hidden = opcoesMulti[c].length > 0;
+}
+
+for (const c of Object.keys(MULTI)) montarMulti(c);
 
 async function carregarJogos(atual) {
   try {
@@ -139,7 +220,7 @@ function desenhar() {
     : estado.fase === "fim" ? `Pronto${estado.duracao != null ? ` em ${estado.duracao} s, ${estado.requisicoes} requisições` : ""}.`
     : estado.fase === "erro" ? "Deu erro." : (estado.mensagem || "");
   $("log").textContent = (estado.log || []).join("\n");
-  for (const c of Object.keys(MULTI)) desenharOpcoes(c);
+  for (const c of Object.keys(MULTI)) desenharMulti(c);
 
   const avisos = [];
   if (estado.erro) avisos.push(estado.erro);

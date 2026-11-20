@@ -59,10 +59,20 @@ tr.invalida td { color: var(--suave); }
 .campo { margin: 8px 0 4px; }
 .rotulo { display: block; font-weight: 500; margin-bottom: 6px; }
 .rotulo small { color: var(--suave); font-weight: 400; }
-.opcoes { display: flex; flex-wrap: wrap; gap: 6px; }
-.opcoes:empty { display: none; }
-label.opcao { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; font-weight: 400; font-size: .9rem;
-  background: var(--chip); border: 1px solid transparent; border-radius: 999px; padding: 4px 12px; cursor: pointer; user-select: none; }
-label.opcao input { margin: 0; accent-color: var(--destaque); }
-label.opcao:has(input:checked) { border-color: var(--destaque); color: var(--destaque); font-weight: 600; }
-label.opcao:has(input:focus-visible) { outline: 2px solid var(--destaque); outline-offset: 2px; }
+.multi { position: relative; }
+.multi-caixa { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 38px; padding: 4px 6px;
+  background: var(--fundo); border: 1px solid var(--borda); border-radius: 6px; cursor: text; }
+.multi-caixa:focus-within { border-color: var(--destaque); }
+.multi-tags { display: contents; }
+.multi-tag { display: inline-flex; align-items: center; gap: 4px; background: var(--destaque); color: var(--destaque-texto);
+  border-radius: 4px; padding: 2px 4px 2px 8px; font-size: .88rem; }
+.multi-tag button { background: transparent; color: inherit; padding: 0 4px; font-size: 1rem; line-height: 1; border-radius: 3px; }
+.multi-tag button:hover { background: rgba(0, 0, 0, .18); }
+.multi-entrada { flex: 1; min-width: 140px; border: 0; padding: 4px; background: transparent; outline: none; }
+.multi-lista { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px 0; list-style: none;
+  max-height: 240px; overflow: auto; background: var(--cartao); border: 1px solid var(--borda); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+.multi-lista li { padding: 6px 12px; cursor: pointer; }
+.multi-lista li.ativo, .multi-lista li[data-v]:hover { background: var(--chip); }
+.multi-lista li.novo { font-style: italic; }
+.multi-lista li.vazio { color: var(--suave); cursor: default; }
