@@ -1,0 +1,1 @@
+highs-js 1.15.4 (npm: highs) — HiGHS compilado para WebAssembly. Licença MIT; o HiGHS em si também é MIT.

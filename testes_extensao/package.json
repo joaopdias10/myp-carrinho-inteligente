@@ -1,0 +1,14 @@
+{
+  "name": "testes-extensao",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node teste_offline.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.3"
+  },
+  "dependencies": {
+    "highs": "^1.15.4"
+  }
+}

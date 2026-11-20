@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prévia da interface</title>
+  <link rel="stylesheet" href="../extensao/app.css">
+</head>
+<body>
+<!-- Prévia da página da extensão fora do Chrome: simula chrome.* com o estado gerado pelo
+     teste offline (ui_estado.json). Sirva a raiz do repositório: python -m http.server 8765 -->
+<script type="module">
+  const estado = await (await fetch("ui_estado.json")).json();
+  const armazenado = {
+    estado,
+    jogos: { quando: Date.now(), lista: [{ slug: "pokemon", nome: "Pokémon" }, { slug: "magic", nome: "Magic" }] },
+    config: { lista: "4 Ultra Ball\n2 Boss's Orders\n4 Nest Ball\nUmbreon V", cep: "01310-100" },
+  };
+  window.enviados = [];
+  window.chrome = {
+    storage: {
+      local: {
+        get: async (k) => (typeof k === "string" ? { [k]: armazenado[k] } : armazenado),
+        set: async (o) => Object.assign(armazenado, o),
+      },
+      onChanged: { addListener: () => {} },
+    },
+    runtime: { sendMessage: async (m) => { window.enviados.push(m); return { ok: true }; } },
+  };
+  const html = await (await fetch("../extensao/app.html")).text();
+  const corpo = new DOMParser().parseFromString(html, "text/html").body;
+  corpo.querySelectorAll("script").forEach((s) => s.remove());
+  document.body.innerHTML = corpo.innerHTML;
+  await import("../extensao/app.js");
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "MYP Carrinho Inteligente",
+  "version": "0.1.0",
+  "description": "Monta o carrinho mais barato da MYP Cards (cartas + frete), agrupando por vendedor.",
+  "minimum_chrome_version": "116",
+  "permissions": ["offscreen", "storage", "notifications"],
+  "host_permissions": ["https://mypcards.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "MYP Carrinho Inteligente", "default_icon": "icone.png" },
+  "icons": { "128": "icone.png" }
+}
