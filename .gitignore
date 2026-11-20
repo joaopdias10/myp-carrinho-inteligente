@@ -17,3 +17,5 @@ cep.txt
 node_modules/
 testes_extensao/ref.json
 testes_extensao/ui_estado.json
+
+.claude/
