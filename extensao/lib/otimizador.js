@@ -246,13 +246,20 @@ function buscaLocal(itens, vendedores, regra, inicio) {
   if (!aloc) return null;
   for (;;) {
     const usados = new Set(aloc.map((x) => x.oferta.vendedor));
+    U = usados; // vendedor permitido e não usado não muda a alocação gulosa
     let achou = null;
     const tentar = (C) => {
       const [t, a] = custo(C);
       if (a && t < melhor - 0.005 && (!achou || t < achou[0])) achou = [t, a, C];
     };
     for (const v of usados) { const C = new Set(U); C.delete(v); tentar(C); }
-    for (const v of todos) if (!U.has(v)) { const C = new Set(U); C.add(v); tentar(C); }
+    for (const v of todos) {
+      if (U.has(v)) continue;
+      const C = new Set(U); C.add(v); tentar(C);
+      // troca: entra v, sai u. Sem isso a busca empaca quando v só compensa juntando cartas
+      // que hoje estão em dois vendedores (ex.: 2 unidades num vendedor no lugar de 1 + 1).
+      for (const u of usados) { const T = new Set(U); T.delete(u); T.add(v); tentar(T); }
+    }
     if (!achou) break;
     [melhor, aloc, U] = achou;
   }
@@ -322,9 +329,15 @@ export function otimizar(itens, vendedores, regra, highs = null) {
   const h = heuristica(itens, vendedores, regra);
   if (!highs || !h) return h;
   let e = null;
-  try { e = exato(highs, itens, vendedores, regra); } catch { /* fica com a heurística */ }
+  try {
+    e = exato(highs, itens, vendedores, regra);
+    if (!e) otimizar.ultimoErro = "o solver não achou solução";
+  } catch (err) {
+    otimizar.ultimoErro = err?.message || String(err); // fica com a heurística
+  }
   return e && e.total <= h.total + 0.005 ? e : h;
 }
+otimizar.ultimoErro = null;
 
 export const itensAtendiveis = (itens) => itens.filter((it) => disponivel(it) >= it.qtd);
 

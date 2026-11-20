@@ -114,6 +114,9 @@ async function executar(p) {
       res = otimizar(ok, vendedores, regra, highs);
     }
     base = maisBaratoPorCarta(ok, vendedores, regra);
+    if (res && !res.metodo.startsWith("exato")) {
+      registrar(`otimização exata indisponível, usei a busca local${highs ? "" : " (solver não carregou)"}${otimizar.ultimoErro ? `: ${otimizar.ultimoErro}` : ""}`);
+    }
   }
 
   return {

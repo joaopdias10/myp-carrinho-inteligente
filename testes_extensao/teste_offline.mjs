@@ -175,5 +175,29 @@ class ClienteCache extends Cliente {
   confere(Object.keys(res.subtotais).every((v) => v in regra.reais), "carrinho final com vendedor sem frete real");
 }
 
+// ------------------------------------------------------------------ 7. busca local: juntar 2 unidades num vendedor
+// Caso real: 3 Fera; as unidades a R$ 1 estão em 3 vendedores e a Yamicardsbr tem 2 a R$ 2,40 com
+// frete R$ 17,39. Sem o solver exato, a busca local precisa trocar xNewbe/Franklin pela Yamicardsbr.
+{
+  const of = (id, vendedor, preco, quantidade) => ({ idEstoque: id, idProduto: 1, vendedor, preco, quantidade,
+    qualidade: "NM", idioma: "Português", printing: null });
+  const itens = [
+    { ...novoItem("3 Fera", 3), todasOfertas: [of(1, "xNewbe", 1, 1), of(2, "Franklin", 1, 1), of(3, "Bortolatto", 1, 1),
+      of(4, "Claudiotonaro", 1.5, 1), of(5, "Yamicardsbr", 2.4, 2), of(6, "TBCorp", 2.49, 3)] },
+    { ...novoItem("2 Ponte", 2), todasOfertas: [of(7, "Bortolatto", 2, 2)] },
+    { ...novoItem("1 Pégaso", 1), todasOfertas: [of(8, "Suricato", 0.5, 1)] },
+  ];
+  aplicarFiltros(itens, { qualidadeMin: "NM" }, null);
+  const reais = { Bortolatto: 19, xNewbe: 18, Franklin: 32.4, Suricato: 16, Yamicardsbr: 17.39, Claudiotonaro: 32.4 };
+  const vend = Object.fromEntries(["xNewbe", "Franklin", "Bortolatto", "Claudiotonaro", "Yamicardsbr", "TBCorp", "Suricato"]
+    .map((n) => [n, { nick: n, cidade: null, freteGratisAPartir: null, freteEstimado: 60 }]));
+  const regra = new RegraFrete({ padrao: 20 });
+  Object.assign(regra.reais, reais);
+  const e = exato(highs, itens, vend, regra);
+  const h = heuristica(itens, vend, regra);
+  console.log(`7. juntar unidades: exato R$ ${e.total.toFixed(2)} | busca local R$ ${h.total.toFixed(2)} (${Object.keys(h.subtotais).join(", ")})`);
+  confere(quase(h.total, e.total), "busca local não achou o ótimo (juntar na Yamicardsbr)");
+}
+
 console.log(falhas ? `\n${falhas} verificação(ões) falharam` : "\nTudo confere com o Python.");
 process.exit(falhas ? 1 : 0);

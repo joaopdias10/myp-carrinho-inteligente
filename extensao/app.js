@@ -231,7 +231,7 @@ $("copiarDiagnostico").addEventListener("click", async () => {
     `Versão ${versao}`,
     "--- Registro", ...(estado.log || []),
     "--- Fretes cotados", ...(r?.cotacoes || []).map((x) => `${x.nick}: ${x.frete != null ? `${x.frete} (${x.opcao})` : `ERRO ${x.erro}`}${x.noCarrinho ? " [no resultado]" : ""}`),
-    "--- Carrinho", ...(r?.carrinho?.vendedores || []).map((v) => `${v.nick}: cartas ${v.subtotal} frete ${v.frete} (${v.origem})`),
+    `--- Carrinho (${r?.carrinho?.metodo || "sem carrinho"})`, ...(r?.carrinho?.vendedores || []).map((v) => `${v.nick}: cartas ${v.subtotal} frete ${v.frete} (${v.origem})`),
   ].join("\n");
   try {
     await navigator.clipboard.writeText(txt);
@@ -304,6 +304,7 @@ function desenharCarrinho(r) {
     <div class="metrica"><span>Vendedores</span><strong>${c.vendedores.length}</strong></div>
     <div class="metrica"><span>Economia vs. mais barato por carta</span><strong class="ok">${brl(economia)}</strong></div>
   </div>
+  <p class="dica">Método: ${esc(c.metodo)}${c.metodo.startsWith("exato") ? "" : " (o solver exato não rodou; veja o Registro)"}</p>
   <div class="acoes"><button type="button" id="colocar">Colocar tudo no meu carrinho da MYP</button></div>`;
   for (const v of c.vendedores) {
     const chips = [
