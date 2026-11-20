@@ -2,12 +2,23 @@
 // esta página só manda comandos e desenha o estado gravado em chrome.storage.local.
 
 const $ = (id) => document.getElementById(id);
-const CAMPOS = ["jogo", "lista", "qualidadeMin", "idiomas", "printingsExcluir", "excluir", "freteReal",
+const CAMPOS = ["jogo", "lista", "qualidadeMin", "excluir", "freteReal",
   "cep", "padrao", "uf", "mesmoUf", "maxPaginas", "token"];
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const brl = (v) => (v == null ? "—" : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));
 const lista = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
+const etiquetas = (p) => lista(p); // "Ultra Rare, 1st" -> ["Ultra Rare", "1st"]
+const chave = (s) => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+// filtros de múltipla escolha: opções = sugestões + o que apareceu nas ofertas da última busca
+const MULTI = {
+  idiomas: { sugestoes: ["Português", "Inglês", "Japonês", "Espanhol", "Coreano", "Chinês", "Italiano", "Francês", "Alemão"],
+    vistos: (r) => r.itens.flatMap((it) => it.ofertas.map((o) => o.idioma)) },
+  printingsExcluir: { sugestoes: [],
+    vistos: (r) => r.itens.flatMap((it) => it.ofertas.flatMap((o) => etiquetas(o.printing))) },
+};
+const selecionados = { idiomas: new Set(), printingsExcluir: new Set() };
 const enviar = (msg) => chrome.runtime.sendMessage({ para: "bg", ...msg });
 
 let estado = { fase: "parado" };
@@ -21,11 +32,40 @@ async function carregarConfig() {
     if ($(c).type === "checkbox") $(c).checked = config[c];
     else $(c).value = config[c];
   }
+  for (const c of Object.keys(MULTI)) { // versões antigas guardavam texto separado por vírgula
+    const v = config[c];
+    selecionados[c] = new Set(Array.isArray(v) ? v : lista(v));
+  }
   return config;
 }
 
 function lerConfig() {
-  return Object.fromEntries(CAMPOS.map((c) => [c, $(c).type === "checkbox" ? $(c).checked : $(c).value]));
+  return {
+    ...Object.fromEntries(CAMPOS.map((c) => [c, $(c).type === "checkbox" ? $(c).checked : $(c).value])),
+    ...Object.fromEntries(Object.keys(MULTI).map((c) => [c, [...selecionados[c]]])),
+  };
+}
+
+/** Desenha as opções de um filtro de múltipla escolha, mantendo o que está marcado. */
+function desenharOpcoes(c) {
+  const vistos = estado.resultado ? MULTI[c].vistos(estado.resultado) : [];
+  const porChave = new Map();
+  for (const v of [...MULTI[c].sugestoes, ...vistos, ...selecionados[c]]) {
+    if (v && !porChave.has(chave(v))) porChave.set(chave(v), v);
+  }
+  const marcadas = new Set([...selecionados[c]].map(chave));
+  const opcoes = [...porChave.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  $(c).innerHTML = opcoes.map((v) => `<label class="opcao"><input type="checkbox" value="${esc(v)}"${marcadas.has(chave(v)) ? " checked" : ""}> ${esc(v)}</label>`).join("");
+  if (c === "printingsExcluir") $("dicaImpressoes").hidden = opcoes.length > 0;
+}
+
+for (const c of Object.keys(MULTI)) {
+  $(c).addEventListener("change", async (ev) => {
+    const v = ev.target.value;
+    for (const x of [...selecionados[c]]) if (chave(x) === chave(v)) selecionados[c].delete(x);
+    if (ev.target.checked) selecionados[c].add(v);
+    await chrome.storage.local.set({ config: lerConfig() });
+  });
 }
 
 async function carregarJogos(atual) {
@@ -38,9 +78,10 @@ async function carregarJogos(atual) {
       await chrome.storage.local.set({ jogos });
     }
     $("jogo").innerHTML = jogos.lista.map((g) => `<option value="${esc(g.slug)}">${esc(g.nome)}</option>`).join("");
-  } catch { /* fica só com Pokémon */ }
-  $("jogo").value = atual || "pokemon";
-  if (!$("jogo").value) $("jogo").value = "pokemon";
+  } catch { /* fica só com Yu-Gi-Oh! */ }
+  $("jogo").value = atual || "yugioh";
+  if (!$("jogo").value) $("jogo").value = "yugioh";
+  if (!$("jogo").value) $("jogo").selectedIndex = 0;
 }
 
 // ------------------------------------------------------------------ ações
@@ -59,8 +100,8 @@ $("form").addEventListener("submit", async (ev) => {
       jogo: cfg.jogo,
       lista: cfg.lista,
       filtros: {
-        qualidadeMin: cfg.qualidadeMin, idiomas: lista(cfg.idiomas),
-        excluir: lista(cfg.excluir), printingsExcluir: lista(cfg.printingsExcluir),
+        qualidadeMin: cfg.qualidadeMin, idiomas: cfg.idiomas,
+        excluir: lista(cfg.excluir), printingsExcluir: cfg.printingsExcluir,
       },
       frete: { padrao: num(cfg.padrao) ?? 20, mesmoUf: num(cfg.mesmoUf), uf: cfg.uf.trim().toUpperCase() || null },
       freteReal: cfg.freteReal,
@@ -98,6 +139,7 @@ function desenhar() {
     : estado.fase === "fim" ? `Pronto${estado.duracao != null ? ` em ${estado.duracao} s, ${estado.requisicoes} requisições` : ""}.`
     : estado.fase === "erro" ? "Deu erro." : (estado.mensagem || "");
   $("log").textContent = (estado.log || []).join("\n");
+  for (const c of Object.keys(MULTI)) desenharOpcoes(c);
 
   const avisos = [];
   if (estado.erro) avisos.push(estado.erro);

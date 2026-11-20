@@ -13,8 +13,8 @@
   const estado = await (await fetch("ui_estado.json")).json();
   const armazenado = {
     estado,
-    jogos: { quando: Date.now(), lista: [{ slug: "pokemon", nome: "Pokémon" }, { slug: "magic", nome: "Magic" }] },
-    config: { lista: "4 Ultra Ball\n2 Boss's Orders\n4 Nest Ball\nUmbreon V", cep: "01310-100" },
+    jogos: { quando: Date.now(), lista: [{ slug: "pokemon", nome: "Pokémon" }, { slug: "magic", nome: "Magic" }, { slug: "yugioh", nome: "Yu-Gi-Oh!" }] },
+    config: { printingsExcluir: "Reverse Foil", lista: "4 Ultra Ball\n2 Boss's Orders\n4 Nest Ball\nUmbreon V", cep: "01310-100" },
   };
   window.enviados = [];
   window.chrome = {

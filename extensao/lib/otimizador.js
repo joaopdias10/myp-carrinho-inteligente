@@ -91,7 +91,7 @@ export function aplicarFiltros(itens, f, freteMax = null) {
     it.ofertas = it.todasOfertas.filter((o) => qOk.has(o.qualidade)
       && (!idiomas.size || idiomas.has(norm(o.idioma)))
       && !excluir.has(o.vendedor.toLowerCase())
-      && !(o.printing && sem.has(norm(o.printing))))
+      && !(o.printing && (sem.has(norm(o.printing)) || o.printing.split(",").some((e) => sem.has(norm(e))))))
       .sort((a, b) => a.preco - b.preco);
     if (freteMax == null) it.candidatas = [...it.ofertas];
     else {

@@ -17,10 +17,10 @@
     <section class="cartao">
       <h2>Lista de cartas</h2>
       <label>Jogo
-        <select id="jogo"><option value="pokemon">Pokémon</option></select>
+        <select id="jogo"><option value="yugioh">Yu-Gi-Oh!</option></select>
       </label>
       <label>Uma carta por linha
-        <textarea id="lista" rows="9" spellcheck="false" placeholder="4 Ultra Ball&#10;2x Boss's Orders | PAL&#10;Umbreon V | EVS 94&#10;https://mypcards.com/pokemon/produto/141400/..."></textarea>
+        <textarea id="lista" rows="9" spellcheck="false" placeholder="3 Regra de Ouro&#10;1 Ponte Arco-Íris | BLCR&#10;3 Fera Cristalina Dragão Arco-íris&#10;https://mypcards.com/yugioh/produto/169772/..."></textarea>
       </label>
       <p class="dica">Formato: <code>[qtd] nome [| EDIÇÃO [número]]</code>. Também aceita o link ou o ID do produto. Nome exato, em português ou inglês.</p>
     </section>
@@ -34,16 +34,20 @@
             <option value="MP">MP</option><option value="HP">HP</option><option value="DM">DM</option>
           </select>
         </label>
-        <label>Idiomas <small>(vírgula; vazio = todos)</small>
-          <input id="idiomas" placeholder="Português, Inglês">
-        </label>
-        <label>Ignorar impressões
-          <input id="printingsExcluir" placeholder="Foil, Reverse Foil">
-        </label>
         <label>Vendedores a evitar
           <input id="excluir" placeholder="nick1, nick2">
         </label>
       </div>
+      <div class="campo">
+        <span class="rotulo">Idiomas aceitos <small>(nenhum marcado = todos)</small></span>
+        <div class="opcoes" id="idiomas"></div>
+      </div>
+      <div class="campo">
+        <span class="rotulo">Ignorar impressões <small>(ofertas com qualquer uma das marcadas ficam de fora)</small></span>
+        <div class="opcoes" id="printingsExcluir"></div>
+        <p class="dica" id="dicaImpressoes">As opções (1st, Super Rare, Foil…) aparecem depois da primeira busca, a partir das ofertas encontradas.</p>
+      </div>
+      <p class="dica">Mudou um filtro depois de buscar? Busque de novo: as páginas já lidas vêm do cache e a busca é rápida.</p>
     </section>
 
     <section class="cartao">
