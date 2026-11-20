@@ -162,7 +162,8 @@ def aplicar_filtros(itens: list[Item], f: Filtros, frete_max: float | None = Non
              if o.qualidade in q_ok
              and (not idiomas or norm(o.idioma) in idiomas)
              and o.vendedor.lower() not in excluir
-             and not (o.printing and norm(o.printing) in sem)),
+             and not (o.printing and (norm(o.printing) in sem
+                                      or any(norm(e) in sem for e in o.printing.split(","))))),
             key=lambda o: o.preco)
         if frete_max is None:
             it.candidatas = list(it.ofertas)
@@ -372,7 +373,11 @@ def heuristica(itens, vendedores, frete) -> Resultado | None:
         return None
     while True:
         usados = {o.vendedor for _, o, _ in aloc}
-        cands = [U - {v} for v in usados] + [U | {v} for v in todos - U]
+        U = set(usados)  # vendedor permitido e não usado não muda a alocação gulosa
+        # tira um, põe um, ou troca (entra v, sai u): sem a troca a busca empaca quando v só
+        # compensa juntando cartas que hoje estão em dois vendedores
+        cands = ([U - {v} for v in usados] + [U | {v} for v in todos - U]
+                 + [(U - {u}) | {v} for v in todos - U for u in usados])
         r = min(((*custo(c), c) for c in cands), key=lambda t: t[0], default=None)
         if not r or r[0] >= melhor - 0.005:
             break

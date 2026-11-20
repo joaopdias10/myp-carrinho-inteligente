@@ -18,7 +18,7 @@ from myp_carrinho import (QUALIDADES, CotadorFrete, Filtros, MypClient, RegraFre
 def main():
     ap = argparse.ArgumentParser(description="Otimizador de carrinho da MYP Cards")
     ap.add_argument("lista", help="arquivo com uma carta por linha")
-    ap.add_argument("--jogo", default="pokemon")
+    ap.add_argument("--jogo", default="yugioh")
     ap.add_argument("--qualidade-min", default="SP", choices=QUALIDADES)
     ap.add_argument("--idiomas", default="", help='ex.: "Português,Inglês" (vazio = todos)')
     ap.add_argument("--excluir", default="", help="vendedores a ignorar, separados por vírgula")

@@ -66,7 +66,7 @@ with st.sidebar:
     st.header("⚙️ Configurações")
     jogos = lista_jogos()
     slugs = list(jogos)
-    jogo = st.selectbox("Jogo", slugs, index=slugs.index("pokemon") if "pokemon" in slugs else 0,
+    jogo = st.selectbox("Jogo", slugs, index=slugs.index("yugioh") if "yugioh" in slugs else 0,
                         format_func=lambda s: jogos[s])
 
     st.subheader("Filtros")
@@ -76,9 +76,10 @@ with st.sidebar:
     idiomas_vistos = sorted({o.idioma for it in itens_sessao for o in it.todas_ofertas})
     idiomas = st.multiselect("Idiomas aceitos", idiomas_vistos or ["Português", "Inglês", "Japonês"],
                              placeholder="Todos")
-    printings_vistos = sorted({o.printing for it in itens_sessao for o in it.todas_ofertas if o.printing})
-    sem_printing = st.multiselect("Ignorar versões", printings_vistos, placeholder="Nenhuma",
-                                  help="Ex.: ignore Foil ou Reverse Foil se quiser só a versão normal.")
+    printings_vistos = sorted({e.strip() for it in itens_sessao for o in it.todas_ofertas if o.printing
+                               for e in o.printing.split(",") if e.strip()})
+    sem_printing = st.multiselect("Ignorar impressões", printings_vistos, placeholder="Nenhuma",
+                                  help="Ofertas com qualquer uma delas ficam de fora (ex.: 1st, Foil, Reverse Foil).")
     vendedores_vistos = sorted({o.vendedor for it in itens_sessao for o in it.todas_ofertas},
                                key=str.lower)
     excluir = st.multiselect("Vendedores a evitar", vendedores_vistos, placeholder="Nenhum")
@@ -133,9 +134,9 @@ with col_ajuda:
 
 | Exemplo | Significa |
 |---|---|
-| `2 Umbreon V` | qualquer edição |
-| `4 Nest Ball \\| SV1` | só a edição SV1 |
-| `1 Umbreon VMAX \\| S6A 048` | edição e número |
+| `3 Regra de Ouro` | qualquer edição |
+| `1 Ponte Arco-Íris \\| BLCR` | só a edição BLCR |
+| `1 Ponte Arco-Íris \\| BLCR blcr-en055` | edição e número |
 | `1 https://mypcards.com/...` | carta exata (URL) |
 
 O nome pode estar em **inglês ou português**. O código da edição é o que aparece na MYP.
@@ -338,6 +339,18 @@ with aba_carrinho:
                                       ensure_ascii=False, indent=2).encode("utf-8"),
                            "carrinho_myp.json", "application/json", use_container_width=True)
         st.caption(f"Método: {res.metodo}.")
+        if cotados:
+            falhas = sum(1 for fr in cotados.values() if not fr.melhor)
+            with st.expander(f"Fretes cotados no carrinho da MYP ({len(cotados)}"
+                             + (f", {falhas} com erro)" if falhas else ")"), expanded=bool(falhas)):
+                st.dataframe(pd.DataFrame([{
+                    "Vendedor": v,
+                    "Frete": fr.melhor.preco if fr.melhor else None,
+                    "Opção / erro": fr.melhor.nome if fr.melhor else (fr.erro or "sem opções de envio"),
+                    "No resultado": "sim" if v in res.subtotais else "",
+                } for v, fr in sorted(cotados.items(), key=lambda x: x[0].lower())]),
+                    hide_index=True, use_container_width=True,
+                    column_config={"Frete": st.column_config.NumberColumn(format="R$ %.2f")})
 
 # ------------------------------------------------------------------ aba: todas as ofertas
 with aba_ofertas:

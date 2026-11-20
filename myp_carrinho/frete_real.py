@@ -178,13 +178,15 @@ class CotadorFrete:
             for v, id_estoque in lote.items():
                 r = self._req("GET", f"/carrinho/adicionar?idestoque={id_estoque}&qtd=1&override=0", ajax=True)
                 try:
-                    cod = json.loads(r.text).get("errCode")
+                    j = json.loads(r.text)
+                    cod, msg = j.get("errCode"), j.get("errmessage") or ""
                 except ValueError:
-                    cod = None
+                    cod, msg = None, r.text[:120]
                 if cod in (1, 5):
                     adicionados.append(id_estoque)
                 else:
-                    self.cache[v] = FreteReal(v, erro=f"não foi possível adicionar ao carrinho (código {cod})")
+                    self.cache[v] = FreteReal(
+                        v, erro=f"não foi possível adicionar ao carrinho (código {cod}{f': {msg}' if msg else ''})")
             if not adicionados:
                 return
             _, csrf = self._carrinho()
@@ -200,7 +202,8 @@ class CotadorFrete:
                     continue
                 html_envio = str(loja)
                 provedores = {i.get("data-provedor-frete") for i in loja.select("input[data-provedor-frete]")}
-                for prov in filter(None, provedores):
+                provedores = set(filter(None, provedores)) or {"Correios"}  # sem opções: pede o cálculo mesmo assim
+                for prov in provedores:
                     r = self._req("POST", f"/carrinho/atualizar-frete?t={int(time.time() * 1000)}",
                                   {"idvendedor": idv, "recalcularFreteProvedor": "true",
                                    "provedorFrete": prov}, ajax=True, csrf=csrf)
@@ -209,8 +212,13 @@ class CotadorFrete:
                     except ValueError:
                         pass
                 opcoes = _opcoes_do_html(html_envio)
+                trecho = ""
+                if not opcoes:
+                    txt = re.sub(r"\s+", " ", BeautifulSoup(html_envio, "html.parser").get_text(" "))
+                    m = re.search(r"Formas de envio.{0,160}", txt)
+                    trecho = f" ({m.group(0)})" if m else ""
                 self.cache[nick] = FreteReal(nick, opcoes=opcoes,
-                                             erro=None if opcoes else "vendedor sem frete com preço")
+                                             erro=None if opcoes else f"vendedor sem frete com preço{trecho}")
         finally:
             if adicionados:
                 try:
